@@ -1,7 +1,7 @@
 # Zero-MessageBus Protocol
 
 Object Schema:
-```json
+```js
 {
   "ver": 1,                                # version identifier (always 1 for now)
   "uid": "",                               # unique id (filled by server)
@@ -45,7 +45,7 @@ This id and counter is used to create the `uid` field which is `unique id` to id
 
 Bus process rewrite the original request to this:
 
-```json
+```js
 {
   "ver": 1,                                # version identifier (always 1 for now)
   "uid": "1002.117",                       # unique id (filled by server)
@@ -64,7 +64,7 @@ Bus process rewrite the original request to this:
 In case of error (eg: requested destination not found), the `err` field is filled with explicit text error
 and the response is directly pushed to `ret` queue.
 
-```json
+```js
 ...
   "err": "destination not found",
 ...
@@ -109,7 +109,7 @@ message is then forwarded to that specific queue.
 
 Source application now get the reply message on it's expected queue.
 
-```json
+```js
 {
   "ver": 1,
   "uid": "1002.117",
