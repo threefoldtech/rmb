@@ -5,6 +5,7 @@ import json
 import os
 import despiegk.crystallib.resp2
 import despiegk.crystallib.redisclient
+import time
 
 pub struct Message {
 pub mut:
@@ -20,6 +21,12 @@ pub mut:
 	schema string [json: shm]     // schema to define payload, later could enforce payload
 	epoch int [json: now]         // unix timestamp when request were created
 	err string [json: err]        // optional error message if any
+}
+
+pub struct HSetEntry {
+	key string
+mut:
+	value Message
 }
 
 fn handle_from_reply_forward(msg Message, mut r redisclient.Redis, value string, twins map[int]string) ? {
@@ -74,6 +81,7 @@ fn handle_from_reply(mut r redisclient.Redis, value string, twins map[int]string
 
 	if msg.twin_dst[0] == myid {
 		handle_from_reply_for_me(msg, mut r, value, twins)?
+
 	} else if msg.twin_src == myid {
 		handle_from_reply_forward(msg, mut r, value, twins)?
 	}
@@ -149,8 +157,42 @@ fn handle_from_local(mut r redisclient.Redis, value string, twins map[int]string
 	if msg.id == "" {
 		handle_from_local_prepare(msg, mut r, value, twins, myid)?
 	} else {
-		// not used FIXME
+		// FIXME: not used, not needed ?
 		handle_from_local_return(msg, mut r, value, twins, myid)?
+	}
+}
+
+fn handle_scrubbing(mut r redisclient.Redis) ? {
+	lines := r.hgetall("msgbus.system.backlog")?
+	mut entries := []HSetEntry{}
+
+	// build usable list from redis response
+	for i := 0; i < lines.len; i += 2 {
+		value := resp2.get_redis_value(lines[i + 1])
+		message := json.decode(Message, value) or {
+			println("decode failed scrubbing")
+			continue
+		}
+
+		entries << HSetEntry{
+			key: resp2.get_redis_value(lines[i]),
+			value: message
+		}
+	}
+
+	now := time.now().unix_time()
+
+	// iterate over each entries
+	for mut entry in entries {
+		if entry.value.epoch + entry.value.expiration > now {
+			println("[+] expired: $entry.key")
+
+			entry.value.err = "timeout (expiration reached)"
+			output := json.encode(entry.value)
+
+			r.lpush(entry.value.retqueue, output)?
+			r.hdel("msgbus.system.backlog", entry.key)?
+		}
 	}
 }
 
@@ -184,7 +226,7 @@ fn main() {
 		m := r.blpop(["msgbus.system.local", "msgbus.system.remote", "msgbus.system.reply"], "1")?
 
 		if m.len == 0 {
-			println("empty")
+			handle_scrubbing(mut r)?
 			continue
 		}
 
