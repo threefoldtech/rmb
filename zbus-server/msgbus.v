@@ -3,9 +3,11 @@ module main
 // import crypto.md5
 import json
 import os
+import time
+import vweb
+import net.http
 import despiegk.crystallib.resp2
 import despiegk.crystallib.redisclient
-import time
 
 pub struct Message {
 pub mut:
@@ -29,6 +31,12 @@ mut:
 	value Message
 }
 
+struct App {
+	vweb.Context
+mut:
+	redis redisclient.Redis
+}
+
 fn handle_from_reply_forward(msg Message, mut r redisclient.Redis, value string, twins map[int]string) ? {
 	// reply have only one destination (source)
 	dst := msg.twin_dst[0]
@@ -43,11 +51,17 @@ fn handle_from_reply_forward(msg Message, mut r redisclient.Redis, value string,
 
 	println("forwarding reply to $dest")
 
-	mut rr := redisclient.connect(dest)?
+	// mut rr := redisclient.connect(dest)?
 
 	// FORWARD
-	rr.lpush("msgbus.system.reply", value)?
-	rr.socket.close()?
+	// rr.lpush("msgbus.system.reply", value)?
+	// rr.socket.close()?
+
+	// forward to reply agent
+	response := http.post("http://$dest/zbus-reply", value) or {
+		println(err)
+		http.Response{}
+	}
 }
 
 fn handle_from_reply_for_me(msg Message, mut r redisclient.Redis, value string, twins map[int]string) ? {
@@ -69,6 +83,9 @@ fn handle_from_reply_for_me(msg Message, mut r redisclient.Redis, value string, 
 
 	// forward reply to original sender
 	r.lpush(update.retqueue, json.encode(update))?
+
+	// remove from backlog
+	r.hdel("msgbus.system.backlog", msg.id)?
 }
 
 fn handle_from_reply(mut r redisclient.Redis, value string, twins map[int]string, myid int) ? {
@@ -132,12 +149,24 @@ fn handle_from_local_prepare(msg Message, mut r redisclient.Redis, value string,
 
 		println("forwarding to $dest")
 
-		mut rr := redisclient.connect(dest)?
+		output := json.encode(update)
+		response := http.post("http://$dest/zbus-remote", output) or {
+			println(err)
+			http.Response{}
+		}
 
+		// FIXME: support retry here
+		println(response)
+
+		/* LEGACY
+		mut rr := redisclient.connect(dest)?
 		output := json.encode(update)
 		rr.lpush("msgbus.system.remote", output)?
 		rr.socket.close()?
+		*/
 
+		// keep message sent into backlog
+		// needed to find back return queue etc.
 		r.hset("msgbus.system.backlog", update.id, value)?
 	}
 }
@@ -217,14 +246,20 @@ fn main() {
 
 	mut twins := map[int]string{}
 
-	twins[1001] = "127.0.0.1:6379"
-	twins[1002] = "127.0.0.1:6372"
+	twins[1001] = "127.0.0.1:8051"
+	twins[1002] = "127.0.0.1:8051"
 
 	if twins[myid] == "" {
 		println("unknown twin id for redis listening")
 	}
 
-	mut r := redisclient.connect(twins[myid])?
+	println('[+] initializing agent server')
+	go fn() {
+		vweb.run(&App{}, 8051)
+	}()
+
+
+	mut r := redisclient.connect("127.0.0.1:6379")?
 
 	for {
 		println("waiting message")
@@ -250,3 +285,42 @@ fn main() {
 		}
 	}
 }
+
+['/zbus-remote'; post]
+pub fn (mut app App) zbus_web_remote() vweb.Result {
+	println("[+] request from external agent")
+	println(app.req.data)
+
+	_ := json.decode(Message, app.req.data) or {
+		return app.json('{"status": "error", "error": "could not parse message request"}')
+	}
+
+	// FIXME: could not create redis single time via init_server for some reason
+	app.redis = redisclient.connect("127.0.0.1:6379") or { panic(err) }
+
+	// forward request to local redis
+	app.redis.lpush("msgbus.system.remote", app.req.data) or { panic(err) }
+	app.redis.socket.close() or { panic(err) }
+
+	return app.json('{"status": "accepted"}')
+}
+
+['/zbus-reply'; post]
+pub fn (mut app App) zbus_web_reply() vweb.Result {
+	println("[+] reply from external agent")
+	println(app.req.data)
+
+	_ := json.decode(Message, app.req.data) or {
+		return app.json('{"status": "error", "error": "could not parse message request"}')
+	}
+
+	// FIXME: could not create redis single time via init_server for some reason
+	app.redis = redisclient.connect("127.0.0.1:6379") or { panic(err) }
+
+	// forward request to local redis
+	app.redis.lpush("msgbus.system.reply", app.req.data) or { panic(err) }
+	app.redis.socket.close() or { panic(err) }
+
+	return app.json('{"status": "accepted"}')
+}
+

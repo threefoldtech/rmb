@@ -24,7 +24,7 @@ var commands = {
     "wallet.stellar.balance.tft": wallet_stellar_balance_tft,
 }
 
-mb = msgbus.server(commands, 6372)
+mb = msgbus.server(commands, 6379)
 mb.serve()
 
 
