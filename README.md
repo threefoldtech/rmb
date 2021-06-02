@@ -1,4 +1,4 @@
-# Zero-MessageBus Protocol
+# Reliable Message Bus Protocol
 
 Object Schema:
 ```js
@@ -7,6 +7,7 @@ Object Schema:
   "uid": "",                               # unique id (filled by server)
   "cmd": "wallet.stellar.balance.tft",     # command to call (aka function name)
   "exp": 3600,                             # expiration in seconds (relative to 'now')
+  "try": 4,                                # amount of retry if remote cannot be joined
   "dat": "R0E3...2WUwzTzdOQzNQUlkN=",      # data base64 encoded
   "src": 0,                                # source twin id (filled by server)
   "dst": [1002],                           # list of twin destination id (filled by client)
@@ -51,6 +52,7 @@ Bus process rewrite the original request to this:
   "uid": "1002.117",                       # unique id (filled by server)
   "cmd": "wallet.stellar.balance.tft",     # command to call (aka function name)
   "exp": 3600,                             # expiration in seconds (relative to 'now')
+  "try": 4,                                # amount of retry if remote cannot be joined
   "dat": "R0E3...2WUwzTzdOQzNQUlkN=",      # data base64 encoded
   "src": 1001,                             # source twin id (filled by server)
   "dst": [1002],                           # list of twin destination id (filled by client)
@@ -115,6 +117,7 @@ Source application now get the reply message on it's expected queue.
   "uid": "1002.117",
   "cmd": "wallet.stellar.balance.tft",
   "exp": 3600,
+  "try": 4,                                  # amount of retry left when proceed
   "dat": "MTgwMjQ4ODQuMTM5MzQxOQ==",         # response base64 encoded
   "src": 1002,
   "dst": [1001],
