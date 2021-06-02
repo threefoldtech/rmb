@@ -8,28 +8,18 @@ import despiegk.crystallib.redisclient
 
 pub struct Message {
 pub mut:
-	version int [json: ver]
-
-	id string [json: uid]
-	// dot notation
-	command string [json: cmd]
-	// expiration in epoch
-	expiration int [json: exp]
-	// the data = payload which will be send to the twin_dest(s)
-	// data []byte
-	data string [json: dat]
-	twin_src int [json: src]
-	// for who is this message meant, can be more than 1
-	twin_dst []int [json: dst]
-	// where do you want the return message to come to
-	// if not specified then its bu
-	return_queue string [json: ret]
-	// schema as used for data, normally empty but can be used to identify the version of the input to the target processor.method
-	schema string [json: shm]
-	// creation date in epoch (int)
-	epoch int [json: now]
-
-	err string [json: err]
+	version int [json: ver]       // protocol version, used for update
+	id string [json: uid]         // unique identifier set by server
+	command string [json: cmd]    // command to request in dot notation
+	expiration int [json: exp]    // expiration in seconds, based on epoch
+	retry int [json: try]         // amount of retry if remote is unreachable
+	data string [json: dat]       // binary payload to send to remote, base64 encoded
+	twin_src int [json: src]      // twinid source, will be set by server
+	twin_dst []int [json: dst]    // twinid of destination, can be more than one
+	retqueue string [json: ret]   // return queue name where to send reply
+	schema string [json: shm]     // schema to define payload, later could enforce payload
+	epoch int [json: now]         // unix timestamp when request were created
+	err string [json: err]        // optional error message if any
 }
 
 fn handle_from_reply_forward(msg Message, mut r redisclient.Redis, value string, twins map[int]string) ? {
@@ -68,10 +58,10 @@ fn handle_from_reply_for_me(msg Message, mut r redisclient.Redis, value string, 
 	}
 
 	// restore return queue name for the caller
-	update.return_queue = original.return_queue
+	update.retqueue = original.retqueue
 
 	// forward reply to original sender
-	r.lpush(update.return_queue, json.encode(update))?
+	r.lpush(update.retqueue, json.encode(update))?
 }
 
 fn handle_from_reply(mut r redisclient.Redis, value string, twins map[int]string, myid int) ? {
@@ -105,7 +95,7 @@ fn handle_from_remote(mut r redisclient.Redis, value string, twins map[int]strin
 }
 
 fn handle_from_local_prepare(msg Message, mut r redisclient.Redis, value string, twins map[int]string, myid int) ? {
-	println("original return queue: $msg.return_queue")
+	println("original return queue: $msg.retqueue")
 
 	for dst in msg.twin_dst {
 		mut update := json.decode(Message, value) or {
@@ -123,14 +113,14 @@ fn handle_from_local_prepare(msg Message, mut r redisclient.Redis, value string,
 			println("unknown twin")
 			update.err = "unknown twin destination"
 			output := json.encode(update)
-			r.lpush(update.return_queue, output)?
+			r.lpush(update.retqueue, output)?
 			continue
 		}
 
 		id := r.incr("msgbus.counter.$dst")?
 
 		update.id = "${dst}.${id}"
-		update.return_queue = "msgbus.system.reply"
+		update.retqueue = "msgbus.system.reply"
 
 		println("forwarding to $dest")
 
