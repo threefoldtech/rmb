@@ -37,7 +37,10 @@ Responses arrives one by one.
 # Processing a request
 
 The ZBus process is waiting on `msgbus.system.local` for incoming messages. As soon as a message is received,
-the bus process resolve destinations id (fetch ip/port from tfgrid), then forward the request to destination redis.
+the bus process resolve destinations id (fetch ip/port from tfgrid), then forward the request to destination
+zbus-server over HTTP. Each zbus server listen to `/zbus-remote` and `/zbus-reply` HTTP POST endpoint.
+
+This method allows redis to only listen locally and inter-zbus talks to each other using HTTP.
 
 To forward the request, `ZBus Process` rewrite `dst` field to only put single destination (the expected one by remote)
 and set the `src` field with it's own digitaltwin id. An internal counter is incremented, based on remote id.
@@ -72,8 +75,8 @@ and the response is directly pushed to `ret` queue.
 ...
 ```
 
-If everything is okay, the bus process push this request to `msgbus.system.remote` queue of the remote redis
-and replace `ret` field by `msgbus.system.reply`.
+If everything is okay, the remote bus server will receive this request over HTTP and push it to local redis
+to `msgbus.system.remote` queue of the and replace `ret` field by `msgbus.system.reply`.
 
 A copy of this request is stored in local redis `HSET msgbus.system.backlog` with `uid` as key. This
 backlog is used to match reply with corresponding original request, to ensure reply comes from a legitim request
@@ -82,7 +85,8 @@ and save original reply queue.
 # Processing a request on the remote side
 
 On the remote side, a local redis and another `ZBus Process` is running. The `ZBus Process` is waiting event on
-`msgbus.system.remote` and will receive the request sent by `1001`.
+HTTP POST `/zbus-remote` and will transfert legit request to local redis queue `msgbus.system.remote`.
+This queue will be proceed by main task and parse request sent by `1001`.
 
 The message is forwarded **as it** to `msgbus.$cmd` queue. An application should wait for message on that
 queue to process the request and send the reply to the `msgbus.system.reply` local queue.
@@ -96,12 +100,14 @@ When a reply is found by `ZBus Process` on the remote side, in the queue `msgbus
 is extracted from the queue.
 
 Because the destination id doesn't match with the local id, the message is forwarded **as it** to `dst`
-redis (resolved), to `msgbus.system.reply` queue too.
+server (resolved), over HTTP POST `/zbus-reply`.
 
 # Processing a reply, on the local side
 
-The same way as remote side, a message will be found on the `msgbus.system.reply` queue, but this time the `dst`
-id will match with local id, so the `ZBus Process` knows this reply was for him.
+When receiving a message over HTTP POST `/zbus-reply`, the legit request is copied into `msgbus.system.reply` queue
+and will be parsed by main redis task. The same way as remote side, when a message will be found on
+the `msgbus.system.reply` queue, but this time the `dst` id will match with local id, so the `ZBus Process`
+knows this reply was for him.
 
 The `uid` from that reply is used to fetch back the original message from the `HSET msgbus.system.backlog`. This
 allow the process to find back the original `ret` queue. The `ret` is replaced with original value and this
