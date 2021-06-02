@@ -184,10 +184,15 @@ fn handle_scrubbing(mut r redisclient.Redis) ? {
 
 	// iterate over each entries
 	for mut entry in entries {
+		if entry.value.expiration == 0 {
+			// avoid infinite expiration, fallback to 1h
+			entry.value.expiration = 3600
+		}
+
 		if entry.value.epoch + entry.value.expiration > now {
 			println("[+] expired: $entry.key")
 
-			entry.value.err = "timeout (expiration reached)"
+			entry.value.err = "request timeout (expiration reached, $entry.value.expiration seconds)"
 			output := json.encode(entry.value)
 
 			r.lpush(entry.value.retqueue, output)?
