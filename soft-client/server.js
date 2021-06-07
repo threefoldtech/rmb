@@ -23,8 +23,7 @@ function wallet_stellar_balance_tft() {
 }
 
 async function createTwin() {
-  const peerID = 'somePeerID'
-  const block = await DbClient.createTwin(peerID)
+  const block = await DbClient.createTwin(this.payload)
   this.reply(block.toHex())
 }
 
