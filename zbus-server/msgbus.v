@@ -8,6 +8,7 @@ import vweb
 import net.http
 import despiegk.crystallib.resp2
 import despiegk.crystallib.redisclient
+import threefoldtech.vgrid.tfgriddb
 
 pub struct Message {
 pub mut:
@@ -42,26 +43,29 @@ fn handle_from_reply_forward(msg Message, mut r redisclient.Redis, value string,
 	dst := msg.twin_dst[0]
 
 	println("resolving twin: $dst")
+	mut dest := resolver(u32(dst)) or {
+		println("unknown twin, drop")
+		return
+	}
+
+	/*
 	dest := twins[dst]
 
 	if dest == "" {
 		println("unknown twin, drop")
 		return
 	}
+	*/
 
 	println("forwarding reply to $dest")
-
-	// mut rr := redisclient.connect(dest)?
-
-	// FORWARD
-	// rr.lpush("msgbus.system.reply", value)?
-	// rr.socket.close()?
 
 	// forward to reply agent
 	response := http.post("http://$dest/zbus-reply", value) or {
 		println(err)
 		http.Response{}
 	}
+
+	println(response)
 }
 
 fn handle_from_reply_for_me(msg Message, mut r redisclient.Redis, value string, twins map[int]string) ? {
@@ -132,6 +136,16 @@ fn handle_from_local_prepare(msg Message, mut r redisclient.Redis, value string,
 		update.twin_dst = [dst]
 
 		println("resolving twin: $dst")
+		mut dest := resolver(u32(dst)) or {
+			println("unknown twin")
+			update.err = "unknown twin destination"
+			output := json.encode(update)
+			r.lpush(update.retqueue, output)?
+			continue
+		}
+
+
+		/*
 		dest := twins[dst]
 
 		if dest == "" {
@@ -141,6 +155,7 @@ fn handle_from_local_prepare(msg Message, mut r redisclient.Redis, value string,
 			r.lpush(update.retqueue, output)?
 			continue
 		}
+		*/
 
 		id := r.incr("msgbus.counter.$dst")?
 
@@ -228,6 +243,17 @@ fn handle_scrubbing(mut r redisclient.Redis) ? {
 			r.hdel("msgbus.system.backlog", entry.key)?
 		}
 	}
+}
+
+fn resolver(twinid u32) ? string {
+	mut db := tfgriddb.tfgrid_new()?
+	twin := db.twin_get_by_id(twinid)?
+
+	if twin.id == 0 {
+		return error("twin not found")
+	}
+
+	return twin.ip
 }
 
 fn main() {
