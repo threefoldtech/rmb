@@ -4,7 +4,7 @@ const uuid4 = require("uuid4");
 //
 // client side
 //
-function prepare(command, destination, expiration) {
+function prepare(command, destination, expiration, retry) {
     var req = {
         "ver": 1,
         "uid": "",
@@ -14,6 +14,7 @@ function prepare(command, destination, expiration) {
         "src": 0,
         "dst": destination,
         "ret": uuid4(),
+        "try": retry,
         "shm": "",
         "now": Math.floor(new Date().getTime() / 1000),
         "err": "",
