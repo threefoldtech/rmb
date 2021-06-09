@@ -3,9 +3,14 @@ const msgbus = require("./msgbus");
 const mb = msgbus.connect()
 mb.prepare("wallet.stellar.balance.tft", [10], 0)
 mb.send("GA7OPN4A3JNHLPHPEWM4PJDOYYDYNZOM7ES6YL3O7NC3PRY3V3UX6ANM")
-let values = mb.read()
+mb.read(function (result) {
+    console.log("result received");
+    console.log(result);
 
-console.log(values)
+    console.log("closing");
+    process.exit(0);
+})
+
 
 /*
 mb.prepare("griddb.twins.create", [1002], 0)

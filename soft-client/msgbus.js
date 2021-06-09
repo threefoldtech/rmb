@@ -35,7 +35,7 @@ function send(payload) {
     this.responses = []
 }
 
-function waitfor() {
+function waitfor(cb) {
     console.log("waiting reply", this.request["ret"])
 
     self = this
@@ -44,14 +44,14 @@ function waitfor() {
             console.log(err)
 
         response = JSON.parse(reply[1])
-        console.log(response)
+        // console.log(response)
 
         response["dat"] = Buffer.from(response["dat"], 'base64').toString('ascii')
         self.responses.push(response)
 
         // checking if we have all responses
         if(self.responses.length == self.request.dst.length) {
-            return self.responses
+            return cb(self.responses);
         }
 
         // wait for remaining responses
@@ -59,8 +59,8 @@ function waitfor() {
     })
 }
 
-function read() {
-    this._waitfor()
+function read(cb) {
+    this._waitfor(cb)
 }
 
 exports.connect = function(host, port) {
