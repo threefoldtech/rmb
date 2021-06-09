@@ -123,66 +123,95 @@ fn handle_from_remote(mut r redisclient.Redis, value string) ? {
 	r.lpush("msgbus." + msg.command, value)?
 }
 
+fn request_needs_retry(msg Message, mut update Message, mut r redisclient.Redis) ? {
+	println("[-] could not send message to remote msgbus")
+
+	// restore 'update' to original state
+	update.retqueue = msg.retqueue
+
+	if update.retry == 0 {
+		println("[-] no more retry, replying with error")
+		update.err = "could not send request and all retries done"
+		output := json.encode(update)
+		r.lpush(update.retqueue, output)?
+		return
+	}
+
+	println("[-] retry set to $update.retry, adding to retry list")
+
+	// remove one retry
+	update.retry -= 1
+	update.epoch = time.now().unix_time()
+
+	value := json.encode(update)
+	r.hset("msgbus.system.retry", update.id, value)?
+}
+
+fn handle_from_local_prepare_item(msg Message, mut r redisclient.Redis, value string, myid int, dst int) ? {
+	mut update := json.decode(Message, value) or {
+		println("decode failed")
+		return
+	}
+
+	update.twin_src = myid
+	update.twin_dst = [dst]
+
+	println("resolving twin: $dst")
+	mut dest := resolver(u32(dst)) or {
+		println("unknown twin")
+		update.err = "unknown twin destination"
+		output := json.encode(update)
+		r.lpush(update.retqueue, output)?
+		return
+	}
+
+
+	/*
+	dest := twins[dst]
+
+	if dest == "" {
+		println("unknown twin")
+		update.err = "unknown twin destination"
+		output := json.encode(update)
+		r.lpush(update.retqueue, output)?
+		continue
+	}
+	*/
+
+	id := r.incr("msgbus.counter.$dst")?
+
+	update.id = "${dst}.${id}"
+	update.retqueue = "msgbus.system.reply"
+
+	println("forwarding to $dest")
+
+	output := json.encode(update)
+	response := http.post("http://$dest:8051/zbus-remote", output) or {
+		eprintln(err)
+		request_needs_retry(msg, mut update, mut r)?
+		return
+	}
+
+	println("[+] message sent to target msgbus")
+	println(response)
+
+	/* LEGACY
+	mut rr := redisclient.connect(dest)?
+	output := json.encode(update)
+	rr.lpush("msgbus.system.remote", output)?
+	rr.socket.close()?
+	*/
+
+	// keep message sent into backlog
+	// needed to find back return queue etc.
+	r.hset("msgbus.system.backlog", update.id, value)?
+}
+
 fn handle_from_local_prepare(msg Message, mut r redisclient.Redis, value string, myid int) ? {
 	println("original return queue: $msg.retqueue")
 
 	for dst in msg.twin_dst {
-		mut update := json.decode(Message, value) or {
-			println("decode failed")
-			return
-		}
-
-		update.twin_src = myid
-		update.twin_dst = [dst]
-
-		println("resolving twin: $dst")
-		mut dest := resolver(u32(dst)) or {
-			println("unknown twin")
-			update.err = "unknown twin destination"
-			output := json.encode(update)
-			r.lpush(update.retqueue, output)?
-			continue
-		}
-
-
-		/*
-		dest := twins[dst]
-
-		if dest == "" {
-			println("unknown twin")
-			update.err = "unknown twin destination"
-			output := json.encode(update)
-			r.lpush(update.retqueue, output)?
-			continue
-		}
-		*/
-
-		id := r.incr("msgbus.counter.$dst")?
-
-		update.id = "${dst}.${id}"
-		update.retqueue = "msgbus.system.reply"
-
-		println("forwarding to $dest")
-
-		output := json.encode(update)
-		response := http.post("http://$dest:8051/zbus-remote", output) or {
-			println(err)
-			http.Response{}
-		}
-
-		// FIXME: support retry here
-		println(response)
-
-		/* LEGACY
-		mut rr := redisclient.connect(dest)?
-		output := json.encode(update)
-		rr.lpush("msgbus.system.remote", output)?
-		rr.socket.close()?
-		*/
-
-		// keep message sent into backlog
-		// needed to find back return queue etc.
-		r.hset("msgbus.system.backlog", update.id, value)?
+		handle_from_local_prepare_item(msg, mut r, value, myid, dst)?
 	}
 }
 
@@ -206,15 +235,14 @@ fn handle_from_local(mut r redisclient.Redis, value string, myid int) ? {
 	}
 }
 
-fn handle_scrubbing(mut r redisclient.Redis) ? {
-	lines := r.hgetall("msgbus.system.backlog")?
+fn handle_internal_hgetall(lines []resp2.RValue) []HSetEntry {
 	mut entries := []HSetEntry{}
 
 	// build usable list from redis response
 	for i := 0; i < lines.len; i += 2 {
 		value := resp2.get_redis_value(lines[i + 1])
 		message := json.decode(Message, value) or {
-			println("decode failed scrubbing")
+			println("decode failed hgetall message")
 			continue
 		}
 
@@ -223,6 +251,15 @@ fn handle_scrubbing(mut r redisclient.Redis) ? {
 			value: message
 		}
 	}
+
+	return entries
+}
+
+fn handle_scrubbing(mut r redisclient.Redis) ? {
+	println("[+] scrubbing")
+
+	lines := r.hgetall("msgbus.system.backlog")?
+	mut entries := handle_internal_hgetall(lines)
 
 	now := time.now().unix_time()
 
@@ -241,6 +278,31 @@ fn handle_scrubbing(mut r redisclient.Redis) ? {
 
 			r.lpush(entry.value.retqueue, output)?
 			r.hdel("msgbus.system.backlog", entry.key)?
+		}
+	}
+}
+
+fn handle_retry(mut r redisclient.Redis, myid int) ? {
+	println("[+] checking retries")
+
+	lines := r.hgetall("msgbus.system.retry")?
+	mut entries := handle_internal_hgetall(lines)
+
+	now := time.now().unix_time()
+
+	// iterate over each entries
+	for mut entry in entries {
+		if now > entry.value.epoch + 5 { // 5 sec debug
+			println("[+] retry needed: $entry.key")
+
+			value := json.encode(entry.value)
+
+			// remove from retry list
+			r.hdel("msgbus.system.retry", entry.key)?
+
+			// re-call sending function, which will succeed
+			// or put it back to retry
+			handle_from_local_prepare_item(entry.value, mut r, value, myid, entry.value.twin_dst[0])?
 		}
 	}
 }
@@ -278,12 +340,15 @@ fn main() {
 
 	mut r := redisclient.connect("127.0.0.1:6379")?
 
+	println("[+] server: waiting requests")
 	for {
-		println("waiting message")
+		println("[+] cycle waiting")
+
 		m := r.blpop(["msgbus.system.local", "msgbus.system.remote", "msgbus.system.reply"], "1")?
 
 		if m.len == 0 {
 			handle_scrubbing(mut r)?
+			handle_retry(mut r, myid)?
 			continue
 		}
 
