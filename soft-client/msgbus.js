@@ -85,42 +85,42 @@ exports.connect = function(host, port) {
 //
 // server-side
 //
-function reply(response) {
-    console.log(this)
+function reply(payload) {
+    // console.log(this)
 
-    reply = this.request
+    response = this.request
     source = this.request["src"]
 
-    reply["dat"] = Buffer.from(response).toString('base64')
-    reply["src"] = reply["dst"][0]
-    reply["dst"] = [source]
-    reply["now"] = Math.floor(new Date().getTime() / 1000)
+    response["dat"] = Buffer.from(payload).toString('base64')
+    response["src"] = response["dst"][0]
+    response["dst"] = [source]
+    response["now"] = Math.floor(new Date().getTime() / 1000)
 
     replyer = this.client.duplicate({}, function (err, replyer) {
-        replyer.lpush(reply["ret"], JSON.stringify(reply), function (err, reply) {
+        replyer.lpush(response["ret"], JSON.stringify(response), function (err, r) {
             console.log("[+] response sent to caller")
-            console.log(err, reply)
+            console.log(err, r)
         })
     })
 
 }
 
 function error(reason) {
-    reply = this.request
+    response = this.request
     source = this.request["src"]
 
     console.log("[-] replying error: " + reason)
 
-    reply["dat"] = ""
-    reply["src"] = reply["dst"][0]
-    reply["dst"] = [source]
-    reply["now"] = Math.floor(new Date().getTime() / 1000)
-    reply["err"] = reason
+    response["dat"] = ""
+    response["src"] = response["dst"][0]
+    response["dst"] = [source]
+    response["now"] = Math.floor(new Date().getTime() / 1000)
+    response["err"] = reason
 
     replyer = this.client.duplicate({}, function (err, replyer) {
-        replyer.lpush(reply["ret"], JSON.stringify(reply), function (err, reply) {
+        replyer.lpush(reply["ret"], JSON.stringify(response), function (err, r) {
             console.log("[+] error response sent to caller")
-            console.log(err, reply)
+            console.log(err, r)
         })
     })
 
