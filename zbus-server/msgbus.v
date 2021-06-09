@@ -38,7 +38,7 @@ mut:
 	redis redisclient.Redis
 }
 
-fn handle_from_reply_forward(msg Message, mut r redisclient.Redis, value string, twins map[int]string) ? {
+fn handle_from_reply_forward(msg Message, mut r redisclient.Redis, value string) ? {
 	// reply have only one destination (source)
 	dst := msg.twin_dst[0]
 
@@ -68,7 +68,7 @@ fn handle_from_reply_forward(msg Message, mut r redisclient.Redis, value string,
 	println(response)
 }
 
-fn handle_from_reply_for_me(msg Message, mut r redisclient.Redis, value string, twins map[int]string) ? {
+fn handle_from_reply_for_me(msg Message, mut r redisclient.Redis, value string) ? {
 	println("message reply for me, fetching backlog")
 
 	retval := r.hget("msgbus.system.backlog", msg.id)?
@@ -92,7 +92,7 @@ fn handle_from_reply_for_me(msg Message, mut r redisclient.Redis, value string, 
 	r.hdel("msgbus.system.backlog", msg.id)?
 }
 
-fn handle_from_reply(mut r redisclient.Redis, value string, twins map[int]string, myid int) ? {
+fn handle_from_reply(mut r redisclient.Redis, value string, myid int) ? {
 	msg := json.decode(Message, value) or {
 		println("decode failed")
 		return
@@ -101,15 +101,15 @@ fn handle_from_reply(mut r redisclient.Redis, value string, twins map[int]string
 	println(msg)
 
 	if msg.twin_dst[0] == myid {
-		handle_from_reply_for_me(msg, mut r, value, twins)?
+		handle_from_reply_for_me(msg, mut r, value)?
 
 	} else if msg.twin_src == myid {
-		handle_from_reply_forward(msg, mut r, value, twins)?
+		handle_from_reply_forward(msg, mut r, value)?
 	}
 }
 
 
-fn handle_from_remote(mut r redisclient.Redis, value string, twins map[int]string) ? {
+fn handle_from_remote(mut r redisclient.Redis, value string) ? {
 	msg := json.decode(Message, value) or {
 		println("decode failed")
 		return
@@ -123,7 +123,7 @@ fn handle_from_remote(mut r redisclient.Redis, value string, twins map[int]strin
 	r.lpush("msgbus." + msg.command, value)?
 }
 
-fn handle_from_local_prepare(msg Message, mut r redisclient.Redis, value string, twins map[int]string, myid int) ? {
+fn handle_from_local_prepare(msg Message, mut r redisclient.Redis, value string, myid int) ? {
 	println("original return queue: $msg.retqueue")
 
 	for dst in msg.twin_dst {
@@ -186,11 +186,11 @@ fn handle_from_local_prepare(msg Message, mut r redisclient.Redis, value string,
 	}
 }
 
-fn handle_from_local_return(msg Message, mut r redisclient.Redis, value string, twins map[int]string, myid int) ? {
+fn handle_from_local_return(msg Message, mut r redisclient.Redis, value string, myid int) ? {
 	println("---")
 }
 
-fn handle_from_local(mut r redisclient.Redis, value string, twins map[int]string, myid int) ? {
+fn handle_from_local(mut r redisclient.Redis, value string, myid int) ? {
 	msg := json.decode(Message, value) or {
 		println("decode failed")
 		return
@@ -199,10 +199,10 @@ fn handle_from_local(mut r redisclient.Redis, value string, twins map[int]string
 	println(msg)
 
 	if msg.id == "" {
-		handle_from_local_prepare(msg, mut r, value, twins, myid)?
+		handle_from_local_prepare(msg, mut r, value, myid)?
 	} else {
 		// FIXME: not used, not needed ?
-		handle_from_local_return(msg, mut r, value, twins, myid)?
+		handle_from_local_return(msg, mut r, value, myid)?
 	}
 }
 
@@ -264,20 +264,11 @@ fn main() {
 		myid = os.args[1].int()
 
 	} else {
-		println("[-] twin id not specified, fallback")
-		myid = 1001
+		println("[-] missing twinid, you have to specify it")
+		exit(1)
 	}
 
 	println("[+] twin id: $myid")
-
-	mut twins := map[int]string{}
-
-	twins[1001] = "127.0.0.1:8051"
-	twins[1002] = "127.0.0.1:8051"
-
-	if twins[myid] == "" {
-		println("unknown twin id for redis listening")
-	}
 
 	println('[+] initializing agent server')
 	go fn() {
@@ -299,15 +290,15 @@ fn main() {
 		value := resp2.get_redis_value(m[1])
 
 		if resp2.get_redis_value(m[0]) == "msgbus.system.reply" {
-			handle_from_reply(mut r, value, twins, myid)?
+			handle_from_reply(mut r, value, myid)?
 		}
 
 		if resp2.get_redis_value(m[0]) == "msgbus.system.local" {
-			handle_from_local(mut r, value, twins, myid)?
+			handle_from_local(mut r, value, myid)?
 		}
 
 		if resp2.get_redis_value(m[0]) == "msgbus.system.remote" {
-			handle_from_remote(mut r, value, twins)?
+			handle_from_remote(mut r, value)?
 		}
 	}
 }
