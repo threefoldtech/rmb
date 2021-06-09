@@ -60,7 +60,7 @@ fn handle_from_reply_forward(msg Message, mut r redisclient.Redis, value string,
 	println("forwarding reply to $dest")
 
 	// forward to reply agent
-	response := http.post("http://$dest/zbus-reply", value) or {
+	response := http.post("http://$dest:8051/zbus-reply", value) or {
 		println(err)
 		http.Response{}
 	}
@@ -165,7 +165,7 @@ fn handle_from_local_prepare(msg Message, mut r redisclient.Redis, value string,
 		println("forwarding to $dest")
 
 		output := json.encode(update)
-		response := http.post("http://$dest/zbus-remote", output) or {
+		response := http.post("http://$dest:8051/zbus-remote", output) or {
 			println(err)
 			http.Response{}
 		}
