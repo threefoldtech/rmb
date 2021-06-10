@@ -3,6 +3,7 @@ import time
 import json
 import encoding.base64
 import despiegk.crystallib.redisclient
+import despiegk.crystallib.resp2
 
 pub struct Message {
 pub mut:
@@ -20,7 +21,7 @@ pub mut:
 	err string [json: err]        // optional error message if any
 }
 
-struct MessageBus{
+struct MessageBusClient{
 mut:
 	client redisclient.Redis
 }
@@ -43,22 +44,49 @@ fn prepare(command string, dst []int, exp int, num_retry int) Message {
 	return msg
 }
 
-fn (mut bus MessageBus) send(mut msg Message, payload string) {
-	msg.data = base64.encode_str(payload)
-	request := json.encode_pretty(msg)
+fn (mut bus MessageBusClient) send(msg Message, payload string) {
+	mut update := msg
+	update.data = base64.encode_str(payload)
+	request := json.encode_pretty(update)
 	bus.client.lpush("msgbus.system.local", request) or { panic(err) }
 }
 
-// fn (mut bus MessageBus) read(mut msg Message, payload string) {
-// 	msg.data = base64.encode_str(payload)
-// 	bus.client.lpush("msgbus.system.local", request)
-// }
+fn (mut bus MessageBusClient) read(msg Message) []Message {
+	println('Waiting reply $msg.retqueue')
+	mut retvalue := resp2.RArray{}
+	mut responses := []Message{}
+	for responses.len < msg.twin_dst.len {
+		results := bus.client.blpop([msg.retqueue], '0') or { panic(err) }
+		for value in results{
+			retvalue.values << value
+		}
 
-// fn main() {
-// 	mut mb :=  MessageBus{
-// 		client: redisclient.connect('localhost:6379') or { panic(err) }
-// 	}
-// 	mut msg := prepare("wallet.stellar.balance.tft", [12], 0, 2)
-// 	mb.send(mut msg,"GA7OPN4A3JNHLPHPEWM4PJDOYYDYNZOM7ES6YL3O7NC3PRY3V3UX6ANM")
+		response_json := resp2.get_redis_value_by_index(retvalue, 1)
+		mut response_msg := json.decode(Message, response_json) or {panic(err)}
+		response_msg.data = base64.decode_str(response_msg.data)
+		responses << response_msg
+	}
+	return responses
+}
 
-// }
+fn main() {
+	mut mb :=  MessageBusClient{
+		client: redisclient.connect('localhost:6379') or { panic(err) }
+	}
+	mut msg_stellar := prepare("wallet.stellar.balance.tft", [12], 0, 2)
+	mb.send(msg_stellar,"GA7OPN4A3JNHLPHPEWM4PJDOYYDYNZOM7ES6YL3O7NC3PRY3V3UX6ANM")
+	response_stellar := mb.read(msg_stellar)
+	println("Result Received for reply: $msg_stellar.retqueue")
+	for result in response_stellar {
+		println(result)
+	}
+
+	mut msg_twin := prepare("griddb.twins.get", [12], 0, 2)
+	mb.send(msg_twin,"1")
+	response_twin := mb.read(msg_twin)
+	println("Result Received for reply: $msg_twin.retqueue")
+	for result in response_twin {
+		println(result)
+	}
+	
+}
