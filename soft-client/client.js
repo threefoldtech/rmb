@@ -1,14 +1,11 @@
-const msgbus = require("./msgbus");
+const msgbus = require("./msgbus")
 
-const mb = msgbus.connect()
-const message = mb.prepare("msgbus.wallet.stellar.balance.tft", [4], 0, 2)
+const mb = msgbus.connect("", 6379)
+const message = mb.prepare("wallet.stellar.balance.tft", [12], 0, 2)
 mb.send(message, "GA7OPN4A3JNHLPHPEWM4PJDOYYDYNZOM7ES6YL3O7NC3PRY3V3UX6ANM")
 mb.read(message, function (result) {
   console.log("result received")
   console.log(result)
-
-  console.log("closing")
-  process.exit(0)
 })
 
 
@@ -19,8 +16,12 @@ mb.read(message, function (result) {
 
 // console.log(values)
 
-// const message = mb.prepare("griddb.twins.get", [1002], 0)
-// mb.send(message, "1")
-// mb.read(message)
+const twinsget = mb.prepare("griddb.twins.get", [12], 0)
+mb.send(twinsget, "1")
+mb.read(twinsget, function (result) {
+  console.log("result received")
+  console.log(result)
 
-// console.log(`values: ${values}`)
+  console.log("closing")
+  process.exit(0)
+})

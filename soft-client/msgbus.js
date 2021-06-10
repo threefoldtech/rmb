@@ -1,5 +1,5 @@
-const redis = require("redis");
-const uuid4 = require("uuid4");
+const redis = require("redis")
+const uuid4 = require("uuid4")
 
 //
 // client side
@@ -35,9 +35,10 @@ function waitfor(message, cb) {
   console.log("waiting reply", message.ret)
 
   const responses = []
-  this.client.blpop(message.ret, 0, function(err, reply) {
-    if(err) {
+  this.client.blpop(message.ret, 0, function (err, reply) {
+    if (err) {
       console.log(`err while waiting for reply: ${err}`)
+      return err
     }
 
     console.log("hello")
@@ -49,7 +50,7 @@ function waitfor(message, cb) {
     responses.push(response)
 
     // checking if we have all responses
-    if(responses.length == message.dst.length) {
+    if (responses.length == message.dst.length) {
       return cb(responses);
     }
 
@@ -62,7 +63,7 @@ function read(message, cb) {
   this._waitfor(message, cb)
 }
 
-exports.connect = function(host, port) {
+exports.connect = function (host, port) {
   const root = {
     client: redis.createClient(port),
     request: null,
@@ -73,7 +74,7 @@ exports.connect = function(host, port) {
     _waitfor: waitfor,
   }
 
-  root.client.on("error", function(error) {
+  root.client.on("error", function (error) {
     console.error(error)
   })
 
@@ -84,104 +85,101 @@ exports.connect = function(host, port) {
 //
 // server-side
 //
-function reply(payload) {
-    // console.log(this)
+function reply(response, payload) {
+  source = response.src
 
-    response = this.request
-    source = this.request["src"]
+  console.log(response)
+  console.log(payload)
+  response["dat"] = Buffer.from(JSON.stringify(payload)).toString('base64')
+  response["src"] = response["dst"][0]
+  response["dst"] = [source]
+  response["now"] = Math.floor(new Date().getTime() / 1000)
 
-    response["dat"] = Buffer.from(payload).toString('base64')
-    response["src"] = response["dst"][0]
-    response["dst"] = [source]
-    response["now"] = Math.floor(new Date().getTime() / 1000)
-
-    replyer = this.client.duplicate({}, function (err, replyer) {
-        replyer.lpush(response["ret"], JSON.stringify(response), function (err, r) {
-            console.log("[+] response sent to caller")
-            console.log(err, r)
-        })
+  replyer = this.client.duplicate({}, function (err, replyer) {
+    replyer.lpush(response["ret"], JSON.stringify(response), function (err, r) {
+      console.log("[+] response sent to caller")
+      console.log(err, r)
     })
+  })
 
 }
 
-function error(reason) {
-    response = this.request
-    source = this.request["src"]
+function error(response, reason) {
+  source = response["src"]
 
-    console.log("[-] replying error: " + reason)
+  console.log("[-] replying error: " + reason)
 
-    response["dat"] = ""
-    response["src"] = response["dst"][0]
-    response["dst"] = [source]
-    response["now"] = Math.floor(new Date().getTime() / 1000)
-    response["err"] = reason
+  response["dat"] = ""
+  response["src"] = response["dst"][0]
+  response["dst"] = [source]
+  response["now"] = Math.floor(new Date().getTime() / 1000)
+  response["err"] = reason
 
-    replyer = this.client.duplicate({}, function (err, replyer) {
-        replyer.lpush(reply["ret"], JSON.stringify(response), function (err, r) {
-            console.log("[+] error response sent to caller")
-            console.log(err, r)
-        })
+  replyer = this.client.duplicate({}, function (err, replyer) {
+    replyer.lpush(reply["ret"], JSON.stringify(response), function (err, r) {
+      console.log("[+] error response sent to caller")
+      console.log(err, r)
     })
+  })
 
 }
 
 function serve() {
-    console.log("[+] waiting for request")
+  console.log("[+] waiting for request")
 
-    self = this
+  self = this
 
-    cmds = Object.keys(this.commands)
-    cmds.push(0)
+  cmds = Object.keys(this.commands)
+  cmds.push(0)
 
-    this.client.blpop(cmds, function(err, response) {
-        if(err)
-            console.log(err)
+  this.client.blpop(cmds, function (err, response) {
+    if (err) console.log(err)
 
-        channel = response[0]
-        request = JSON.parse(response[1])
-        payload = Buffer.from(request['dat'], 'base64').toString('ascii')
+    channel = response[0]
+    request = JSON.parse(response[1])
+    payload = Buffer.from(request.dat, 'base64').toString('ascii')
 
-        const handler = {
-            client: self.client,
-            channel: channel,
-            callback: self.commands[channel],
-            request: request,
-            payload: payload,
-            reply: reply,
-            error: error,
-        };
+    const handler = {
+      client: self.client,
+      channel: channel,
+      callback: self.commands[channel],
+      request: request,
+      payload: payload,
+      reply: reply,
+      error: error,
+    };
 
-        console.log("[+] request received: " + handler["channel"])
-        handler.callback()
+    console.log("[+] request received: " + handler["channel"])
+    handler.callback(request, payload)
 
-        // waiting for next event
-        self.serve()
-    })
+    // waiting for next event
+    self.serve()
+  })
 
 }
 
-exports.server = function(commands, port) {
-    cmdnames = Object.keys(commands)
-    zcommands = {}
+exports.server = function (commands, port) {
+  cmdnames = Object.keys(commands)
+  zcommands = {}
 
-    for(var i in cmdnames) {
-        const cmd = cmdnames[i]
-        zcommands["msgbus." + cmd] = commands[cmd]
-    }
+  for (var i in cmdnames) {
+    const cmd = cmdnames[i]
+    zcommands["msgbus." + cmd] = commands[cmd]
+  }
 
-    for(var name in zcommands) {
-        console.log("[+] watching: " + name)
-    }
+  for (var name in zcommands) {
+    console.log("[+] watching: " + name)
+  }
 
-    const root = {
-        client: redis.createClient(port),
-        commands: zcommands,
-        serve: serve,
-    };
+  const root = {
+    client: redis.createClient(port),
+    commands: zcommands,
+    serve
+  };
 
-    root.client.on("error", function(error) {
-        console.error(error);
-    });
+  root.client.on("error", function (error) {
+    console.error(error);
+  })
 
-    return root
+  return root
 }
