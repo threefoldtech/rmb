@@ -23,11 +23,13 @@ function wallet_stellar_balance_tft() {
 }
 
 async function createTwin() {
+  console.log(`create twin payload: ${this.payload}`)
   const block = await DbClient.createTwin(this.payload)
   this.reply(block.toHex())
 }
 
 async function getTwinByID() {
+  console.log(`get twin by id payload: ${this.payload}`)
   const twin = await DbClient.getTwinByID(this.payload)
   this.reply(twin)
 }

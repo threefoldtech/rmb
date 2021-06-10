@@ -5,81 +5,79 @@ const uuid4 = require("uuid4");
 // client side
 //
 function prepare(command, destination, expiration, retry) {
-    var req = {
-        "ver": 1,
-        "uid": "",
-        "cmd": command,
-        "exp": expiration,
-        "dat": "",
-        "src": 0,
-        "dst": destination,
-        "ret": uuid4(),
-        "try": retry,
-        "shm": "",
-        "now": Math.floor(new Date().getTime() / 1000),
-        "err": "",
+  return {
+    "ver": 1,
+    "uid": "",
+    "cmd": command,
+    "exp": expiration,
+    "dat": "",
+    "src": 0,
+    "dst": destination,
+    "ret": uuid4(),
+    "try": retry,
+    "shm": "",
+    "now": Math.floor(new Date().getTime() / 1000),
+    "err": "",
+  }
+}
+
+function send(message, payload) {
+  const data = new Buffer.from(payload)
+
+  message.dat = data.toString('base64')
+  const request = JSON.stringify(message)
+
+  this.client.lpush(["msgbus.system.local", request], redis.print)
+  console.log(request)
+}
+
+function waitfor(message, cb) {
+  console.log("waiting reply", message.ret)
+
+  const responses = []
+  this.client.blpop(message.ret, 0, function(err, reply) {
+    if(err) {
+      console.log(`err while waiting for reply: ${err}`)
     }
 
-    this.request = req
-    return this
+    console.log("hello")
+    console.log(reply)
+    const response = JSON.parse(reply[1])
+    // console.log(response)
+
+    response["dat"] = Buffer.from(response["dat"], 'base64').toString('ascii')
+    responses.push(response)
+
+    // checking if we have all responses
+    if(responses.length == message.dst.length) {
+      return cb(responses);
+    }
+
+    // wait for remaining responses
+    waitfor()
+  })
 }
 
-function send(payload) {
-    data = new Buffer.from(payload)
-
-    this.request["dat"] = data.toString('base64')
-    request = JSON.stringify(this.request)
-
-    this.client.lpush(["msgbus.system.local", request], redis.print)
-    console.log(request)
-
-    this.responses = []
-}
-
-function waitfor(cb) {
-    console.log("waiting reply", this.request["ret"])
-
-    self = this
-    this.client.blpop(this.request['ret'], 0, function(err, reply) {
-        if(err)
-            console.log(err)
-
-        response = JSON.parse(reply[1])
-        // console.log(response)
-
-        response["dat"] = Buffer.from(response["dat"], 'base64').toString('ascii')
-        self.responses.push(response)
-
-        // checking if we have all responses
-        if(self.responses.length == self.request.dst.length) {
-            return cb(self.responses);
-        }
-
-        // wait for remaining responses
-        self.waitfor()
-    })
-}
-
-function read(cb) {
-    this._waitfor(cb)
+function read(message, cb) {
+  this._waitfor(message, cb)
 }
 
 exports.connect = function(host, port) {
-    const root = {
-        client: redis.createClient(port),
-        request: null,
-        responses: null,
-        prepare: prepare,
-        send: send,
-        read: read,
-        _waitfor: waitfor,
-    };
+  const root = {
+    client: redis.createClient(port),
+    request: null,
+    responses: null,
+    prepare: prepare,
+    send: send,
+    read: read,
+    _waitfor: waitfor,
+  }
 
-    root.client.on("error", function(error) {
-        console.error(error);
-    });
+  root.client.on("error", function(error) {
+    console.error(error)
+  })
 
-    return root
+  return root
 }
 
 
