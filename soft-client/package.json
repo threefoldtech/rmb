@@ -12,6 +12,7 @@
   "dependencies": {
     "redis": "^3.1.2",
     "stellar-sdk": "^8.2.2",
+    "tfgrid-api-client": "^0.0.1-beta.32",
     "uuid4": "^2.0.2"
   }
 }

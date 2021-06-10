@@ -2,10 +2,10 @@ const StellarSdk = require('stellar-sdk');
 const server = new StellarSdk.Server('https://horizon.stellar.org');
 const msgbus = require('./msgbus')
 
-const DbClient = require('tfgrid-api-client')
-
+const Client = require('tfgrid-api-client')
 const url = "wss://explorer.devnet.grid.tf"
 const mnemonic = "some words"
+const DbClient = new Client(url, mnemonic)
 
 function wallet_stellar_balance_tft() {
   if (this.payload.length != 56)
