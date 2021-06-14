@@ -1,48 +1,51 @@
 const StellarSdk = require('stellar-sdk');
 const server = new StellarSdk.Server('https://horizon.stellar.org');
-const msgbus = require('./msgbus')
+const { MessageBusServer } = require('./msgbus')
 
+// test mnemonic
+const mnemonic = "industry dismiss casual gym gap music pave gasp sick owner dumb cost"
 const Client = require('tfgrid-api-client')
 const url = "wss://explorer.devnet.grid.tf/ws"
-const mnemonic = "industry dismiss casual gym gap music pave gasp sick owner dumb cost"
 const DbClient = new Client(url, mnemonic)
 
-function wallet_stellar_balance_tft(message, payload) {
-  if (payload.length != 56)
-    return this.error(message, "invalid address format")
+async function walletStellarTftHandler(message, payload) {
+  if (payload.length != 56) {
+    throw 'invalid address format'
+  }
 
   console.log("[+] stellar: query address: " + payload)
 
-  server.loadAccount(payload).then(account => {
-    account.balances.forEach(balance => {  
-      if (balance.asset_code == "TFT") {
-        this.reply(message, balance.balance)
-      }
-    })
+  const account = await server.loadAccount(payload)
+  
+  let total = 0
+  account.balances.forEach(b => {
+    if (b.asset_code == "TFT") {
+      total += parseFloat(b.balance)
+    }
   })
+
+  return total
 }
 
-async function createTwin(message, payload) {
+async function createTwinHandler(message, payload) {
   await DbClient.init()
   console.log(`create twin payload: ${payload}`)
   const block = await DbClient.createTwin(payload)
-  this.reply(message, block.toHex())
+  return block.toHex()
 }
 
-async function getTwinByID(message, payload) {
+async function getTwinByIDHandler(message, payload) {
   await DbClient.init()
   console.log(`get twin by id payload: ${payload}`)
   const twin = await DbClient.getTwinByID(parseInt(payload))
-  this.reply(message, twin)
+  return twin
 }
 
-const commands = {
-  "wallet.stellar.balance.tft": wallet_stellar_balance_tft,
-  "griddb.twins.create": createTwin,
-  "griddb.twins.get": getTwinByID,
-}
+const msgBus = new MessageBusServer(6379)
+msgBus.withHandler("wallet.stellar.balance.tft", walletStellarTftHandler)
+msgBus.withHandler("griddb.twins.create", createTwinHandler)
+msgBus.withHandler("griddb.twins.get", getTwinByIDHandler)
 
-mb = msgbus.server(commands, 6379)
-mb.serve()
+msgBus.run()
 
 

@@ -3,6 +3,7 @@ import os
 
 fn test_server(){
 	mut myid := 1000
+	mut redis_addr := "127.0.0.1:6379"
 
 	if os.args.len > 1 {
 		println("[+] twin id is user defined")
@@ -13,5 +14,9 @@ fn test_server(){
 		exit(1)
 	}
 
-	server.run_server(myid) or { panic("Can't run msgbus server with error $err") }
+	if os.args.len > 2 {
+		redis_addr = os.args[2]
+	}
+
+	server.run_server(myid, redis_addr) or { panic("Can't run msgbus server with error $err") }
 }

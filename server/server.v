@@ -37,6 +37,24 @@ mut:
 	redis redisclient.Redis
 }
 
+fn validate_input(msg Message) ? {
+	if msg.version != 1 {
+		return error("protocol version mismatch")
+	}
+
+	if msg.command == "" {
+		return error("missing command request")
+	}
+
+	if msg.twin_dst.len == 0 {
+		return error("missing twin destination")
+	}
+
+	if msg.retqueue == "" {
+		return error("return queue not defined")
+	}
+}
+
 fn handle_from_reply_forward(msg Message, mut r redisclient.Redis, value string) ? {
 	// reply have only one destination (source)
 	dst := msg.twin_dst[0]
@@ -99,6 +117,12 @@ fn handle_from_reply(mut r redisclient.Redis, value string, myid int) ? {
 
 	println(msg)
 
+	validate_input(msg) or {
+		println("reply: could not validate input")
+		println(err)
+		return
+	}
+
 	if msg.twin_dst[0] == myid {
 		handle_from_reply_for_me(msg, mut r, value)?
 
@@ -115,6 +139,12 @@ fn handle_from_remote(mut r redisclient.Redis, value string) ? {
 	}
 
 	println(msg)
+
+	validate_input(msg) or {
+		println("remote: could not validate input")
+		println(err)
+		return
+	}
 
 	println("forwarding to local service: msgbus." + msg.command)
 
@@ -224,6 +254,12 @@ fn handle_from_local(mut r redisclient.Redis, value string, myid int) ? {
 		return
 	}
 
+	validate_input(msg) or {
+		println("local: could not validate input")
+		println(err)
+		return
+	}
+
 	println(msg)
 
 	if msg.id == "" {
@@ -317,7 +353,7 @@ fn resolver(twinid u32) ? string {
 	return twin.ip
 }
 
-pub fn run_server(myid int)?{
+pub fn run_server(myid int, redis_addres string)?{
 	println("[+] twin id: $myid")
 
 	println('[+] initializing agent server')
@@ -325,7 +361,9 @@ pub fn run_server(myid int)?{
 		vweb.run(&App{}, 8051)
 	}()
 
-	mut r := redisclient.connect("127.0.0.1:6379")?
+
+	println("[+] connecting to redis: $redis_addres")
+	mut r := redisclient.connect(redis_addres)?
 
 	println("[+] server: waiting requests")
 	for {
