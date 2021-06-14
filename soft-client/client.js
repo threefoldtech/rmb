@@ -2,8 +2,9 @@ const { MessageBusClient } = require('./msgbus')
 
 const mb = new MessageBusClient(6379)
 
-const message = mb.prepare("wallet.stellar.balance.tft", [13], 0, 2)
-mb.send(message, "GA7OPN4A3JNHLPHPEWM4PJDOYYDYNZOM7ES6YL3O7NC3PRY3V3UX6ANM")
+const message = mb.prepare("wallet.stellar.balance.tft", [14], 0, 2)
+const parsedAddress = Buffer.from("GA7OPN4A3JNHLPHPEWM4PJDOYYDYNZOM7ES6YL3O7NC3PRY3V3UX6ANM").toString('base64')
+mb.send(message, parsedAddress)
 mb.read(message, function (result) {
   console.log("result received")
   console.log(result)

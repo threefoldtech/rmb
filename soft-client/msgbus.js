@@ -104,10 +104,13 @@ class MessageBusServer {
 
       const handler = _this.handlers.get(channel)
 
-      const data = await handler(parsedRequest, payload)
-      console.log(`data from handler: ${data}`)
-
-      _this.reply(parsedRequest, data)
+      try {
+        const data = await handler(parsedRequest, payload)
+        console.log(`data from handler: ${data}`)
+        _this.reply(parsedRequest, data)
+      } catch (error) {
+        _this.error(parsedRequest, error)
+      }
 
       _this.run()
     })
@@ -136,16 +139,13 @@ class MessageBusServer {
     message.now = Math.floor(new Date().getTime() / 1000)
     message.err = reason
 
-    replyer = this.client.duplicate({}, function (err, replyer) {
-      replyer.lpush(message.ret, JSON.stringify(message), function (err, r) {
-        if (err) {
-          console.log(err, r)
-          return
-        }
-        console.log("[+] error response sent to caller")
-      })
+    this.client.lpush(message.ret, JSON.stringify(message), function (err, r) {
+      if (err) {
+        console.log(err, r)
+        return
+      }
+      console.log("[+] error response sent to caller")
     })
-
   }
 }
 

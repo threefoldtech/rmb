@@ -9,15 +9,16 @@ const url = "wss://explorer.devnet.grid.tf/ws"
 const DbClient = new Client(url, mnemonic)
 
 async function walletStellarTftHandler(message, payload) {
-  if (payload.length != 56)
-    return this.error(message, "invalid address format")
+  if (payload.length != 56) {
+    throw 'invalid address format'
+  }
 
   console.log("[+] stellar: query address: " + payload)
 
   const account = await server.loadAccount(payload)
   
   let total = 0
-  const balance = account.balances.map(b => {
+  account.balances.forEach(b => {
     if (b.asset_code == "TFT") {
       total += parseFloat(b.balance)
     }
