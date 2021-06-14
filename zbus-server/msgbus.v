@@ -356,6 +356,7 @@ fn resolver(twinid u32) ? string {
 
 fn main() {
 	mut myid := 1000
+	mut raddr := "127.0.0.1:6379"
 
 	if os.args.len > 1 {
 		println("[+] twin id is user defined")
@@ -366,6 +367,10 @@ fn main() {
 		exit(1)
 	}
 
+	if os.args.len > 2 {
+		raddr = os.args[2]
+	}
+
 	println("[+] twin id: $myid")
 
 	println('[+] initializing agent server')
@@ -374,7 +379,8 @@ fn main() {
 	}()
 
 
-	mut r := redisclient.connect("127.0.0.1:6379")?
+	println("[+] connecting to redis: $raddr")
+	mut r := redisclient.connect(raddr)?
 
 	println("[+] server: waiting requests")
 	for {
