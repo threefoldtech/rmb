@@ -1,8 +1,7 @@
-module main
+module server
 
 // import crypto.md5
 import json
-import os
 import time
 import vweb
 import net.http
@@ -318,25 +317,13 @@ fn resolver(twinid u32) ? string {
 	return twin.ip
 }
 
-fn main() {
-	mut myid := 1000
-
-	if os.args.len > 1 {
-		println("[+] twin id is user defined")
-		myid = os.args[1].int()
-
-	} else {
-		println("[-] missing twinid, you have to specify it")
-		exit(1)
-	}
-
+pub fn run_server(myid int)?{
 	println("[+] twin id: $myid")
 
 	println('[+] initializing agent server')
 	go fn() {
 		vweb.run(&App{}, 8051)
 	}()
-
 
 	mut r := redisclient.connect("127.0.0.1:6379")?
 
