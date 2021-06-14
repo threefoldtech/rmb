@@ -29,9 +29,7 @@ class MessageBusClient {
   }
 
   send(message, payload) {
-    const data = new Buffer.from(payload)
-  
-    message.dat = data.toString('base64')
+    message.dat = payload
     const request = JSON.stringify(message)
   
     this.client.lpush(["msgbus.system.local", request], redis.print)
