@@ -1,6 +1,5 @@
 module server
 
-// import crypto.md5
 import json
 import time
 import vweb
@@ -31,10 +30,17 @@ mut:
 	value Message
 }
 
+struct MBusCtx {
+mut:
+	raddr string     // redis address
+	myid int         // local twin id
+}
+
 struct App {
 	vweb.Context
 mut:
 	redis redisclient.Redis
+	config shared MBusCtx
 }
 
 fn validate_input(msg Message) ? {
@@ -109,7 +115,7 @@ fn handle_from_reply_for_me(msg Message, mut r redisclient.Redis, value string) 
 	r.hdel("msgbus.system.backlog", msg.id)?
 }
 
-fn handle_from_reply(mut r redisclient.Redis, value string, myid int) ? {
+fn handle_from_reply(mut r redisclient.Redis, value string, config MBusCtx) ? {
 	msg := json.decode(Message, value) or {
 		println("decode failed")
 		return
@@ -123,10 +129,10 @@ fn handle_from_reply(mut r redisclient.Redis, value string, myid int) ? {
 		return
 	}
 
-	if msg.twin_dst[0] == myid {
+	if msg.twin_dst[0] == config.myid {
 		handle_from_reply_for_me(msg, mut r, value)?
 
-	} else if msg.twin_src == myid {
+	} else if msg.twin_src == config.myid {
 		handle_from_reply_forward(msg, mut r, value)?
 	}
 }
@@ -176,13 +182,13 @@ fn request_needs_retry(msg Message, mut update Message, mut r redisclient.Redis)
 	r.hset("msgbus.system.retry", update.id, value)?
 }
 
-fn handle_from_local_prepare_item(msg Message, mut r redisclient.Redis, value string, myid int, dst int) ? {
+fn handle_from_local_prepare_item(msg Message, mut r redisclient.Redis, value string, config MBusCtx, dst int) ? {
 	mut update := json.decode(Message, value) or {
 		println("decode failed")
 		return
 	}
 
-	update.twin_src = myid
+	update.twin_src = config.myid
 	update.twin_dst = [dst]
 
 	println("resolving twin: $dst")
@@ -236,19 +242,19 @@ fn handle_from_local_prepare_item(msg Message, mut r redisclient.Redis, value st
 	r.hset("msgbus.system.backlog", update.id, value)?
 }
 
-fn handle_from_local_prepare(msg Message, mut r redisclient.Redis, value string, myid int) ? {
+fn handle_from_local_prepare(msg Message, mut r redisclient.Redis, value string, config MBusCtx) ? {
 	println("original return queue: $msg.retqueue")
 
 	for dst in msg.twin_dst {
-		handle_from_local_prepare_item(msg, mut r, value, myid, dst)?
+		handle_from_local_prepare_item(msg, mut r, value, config, dst)?
 	}
 }
 
-fn handle_from_local_return(msg Message, mut r redisclient.Redis, value string, myid int) ? {
+fn handle_from_local_return(msg Message, mut r redisclient.Redis, value string, config MBusCtx) ? {
 	println("---")
 }
 
-fn handle_from_local(mut r redisclient.Redis, value string, myid int) ? {
+fn handle_from_local(mut r redisclient.Redis, value string, config MBusCtx) ? {
 	msg := json.decode(Message, value) or {
 		println("decode failed")
 		return
@@ -263,10 +269,10 @@ fn handle_from_local(mut r redisclient.Redis, value string, myid int) ? {
 	println(msg)
 
 	if msg.id == "" {
-		handle_from_local_prepare(msg, mut r, value, myid)?
+		handle_from_local_prepare(msg, mut r, value, config)?
 	} else {
 		// FIXME: not used, not needed ?
-		handle_from_local_return(msg, mut r, value, myid)?
+		handle_from_local_return(msg, mut r, value, config)?
 	}
 }
 
@@ -317,7 +323,7 @@ fn handle_scrubbing(mut r redisclient.Redis) ? {
 	}
 }
 
-fn handle_retry(mut r redisclient.Redis, myid int) ? {
+fn handle_retry(mut r redisclient.Redis, config MBusCtx) ? {
 	println("[+] checking retries")
 
 	lines := r.hgetall("msgbus.system.retry")?
@@ -337,7 +343,7 @@ fn handle_retry(mut r redisclient.Redis, myid int) ? {
 
 			// re-call sending function, which will succeed
 			// or put it back to retry
-			handle_from_local_prepare_item(entry.value, mut r, value, myid, entry.value.twin_dst[0])?
+			handle_from_local_prepare_item(entry.value, mut r, value, config, entry.value.twin_dst[0])?
 		}
 	}
 }
@@ -353,17 +359,29 @@ fn resolver(twinid u32) ? string {
 	return twin.ip
 }
 
-pub fn run_server(myid int, redis_addres string)?{
+fn runweb(config MBusCtx) {
+	app := App{
+		config: config,
+	}
+
+	vweb.run(app, 8051)
+}
+
+pub fn run_server(myid int, redis_addres string) ? {
+	config := MBusCtx{
+		myid: myid,
+		raddr: redis_addres
+	}
+
+	// gconfig = config
+
 	println("[+] twin id: $myid")
 
 	println('[+] initializing agent server')
-	go fn() {
-		vweb.run(&App{}, 8051)
-	}()
+	go runweb(config)
 
-
-	println("[+] connecting to redis: $redis_addres")
-	mut r := redisclient.connect(redis_addres)?
+	println("[+] connecting to redis: $config.raddr")
+	mut r := redisclient.connect(config.raddr)?
 
 	println("[+] server: waiting requests")
 	for {
@@ -373,18 +391,18 @@ pub fn run_server(myid int, redis_addres string)?{
 
 		if m.len == 0 {
 			handle_scrubbing(mut r)?
-			handle_retry(mut r, myid)?
+			handle_retry(mut r, config)?
 			continue
 		}
 
 		value := resp2.get_redis_value(m[1])
 
 		if resp2.get_redis_value(m[0]) == "msgbus.system.reply" {
-			handle_from_reply(mut r, value, myid)?
+			handle_from_reply(mut r, value, config)?
 		}
 
 		if resp2.get_redis_value(m[0]) == "msgbus.system.local" {
-			handle_from_local(mut r, value, myid)?
+			handle_from_local(mut r, value, config)?
 		}
 
 		if resp2.get_redis_value(m[0]) == "msgbus.system.remote" {
@@ -403,11 +421,13 @@ pub fn (mut app App) zbus_web_remote() vweb.Result {
 	}
 
 	// FIXME: could not create redis single time via init_server for some reason
-	app.redis = redisclient.connect("127.0.0.1:6379") or { panic(err) }
+	lock app.config {
+		mut redis := redisclient.connect(app.config.raddr) or { panic(err) }
 
-	// forward request to local redis
-	app.redis.lpush("msgbus.system.remote", app.req.data) or { panic(err) }
-	app.redis.socket.close() or { panic(err) }
+		// forward request to local redis
+		redis.lpush("msgbus.system.remote", app.req.data) or { panic(err) }
+		redis.socket.close() or { panic(err) }
+	}
 
 	return app.json('{"status": "accepted"}')
 }
@@ -421,12 +441,14 @@ pub fn (mut app App) zbus_web_reply() vweb.Result {
 		return app.json('{"status": "error", "error": "could not parse message request"}')
 	}
 
-	// FIXME: could not create redis single time via init_server for some reason
-	app.redis = redisclient.connect("127.0.0.1:6379") or { panic(err) }
+	lock app.config {
+		// FIXME: could not create redis single time via init_server for some reason
+		mut redis := redisclient.connect(app.config.raddr) or { panic(err) }
 
-	// forward request to local redis
-	app.redis.lpush("msgbus.system.reply", app.req.data) or { panic(err) }
-	app.redis.socket.close() or { panic(err) }
+		// forward request to local redis
+		redis.lpush("msgbus.system.reply", app.req.data) or { panic(err) }
+		redis.socket.close() or { panic(err) }
+	}
 
 	return app.json('{"status": "accepted"}')
 }

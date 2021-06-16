@@ -1,7 +1,7 @@
 import threefoldtech.rmb.server
 import os
 
-fn test_server(){
+fn test_server() {
 	mut myid := 1000
 	mut redis_addr := "127.0.0.1:6379"
 
