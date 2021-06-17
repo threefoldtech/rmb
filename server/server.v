@@ -32,6 +32,7 @@ mut:
 
 struct MBusCtx {
 mut:
+	debug int        // debug level
 	raddr string     // redis address
 	myid int         // local twin id
 }
@@ -80,7 +81,7 @@ fn handle_from_reply_forward(msg Message, mut r redisclient.Redis, value string)
 	}
 	*/
 
-	println("forwarding reply to $dest")
+	println("[+] forwarding reply to $dest")
 
 	// forward to reply agent
 	response := http.post("http://$dest:8051/zbus-reply", value) or {
@@ -92,7 +93,7 @@ fn handle_from_reply_forward(msg Message, mut r redisclient.Redis, value string)
 }
 
 fn handle_from_reply_for_me(msg Message, mut r redisclient.Redis, value string) ? {
-	println("message reply for me, fetching backlog")
+	println("[+] message reply for me, fetching backlog")
 
 	retval := r.hget("msgbus.system.backlog", msg.id)?
 	original := json.decode(Message, retval) or {
@@ -121,7 +122,9 @@ fn handle_from_reply(mut r redisclient.Redis, value string, config MBusCtx) ? {
 		return
 	}
 
-	println(msg)
+	if config.debug > 0 {
+		println(msg)
+	}
 
 	validate_input(msg) or {
 		println("reply: could not validate input")
@@ -144,7 +147,7 @@ fn handle_from_remote(mut r redisclient.Redis, value string) ? {
 		return
 	}
 
-	println(msg)
+	// println(msg)
 
 	validate_input(msg) or {
 		println("remote: could not validate input")
@@ -152,7 +155,7 @@ fn handle_from_remote(mut r redisclient.Redis, value string) ? {
 		return
 	}
 
-	println("forwarding to local service: msgbus." + msg.command)
+	println("[+] forwarding to local service: msgbus." + msg.command)
 
 	// forward to local service
 	r.lpush("msgbus." + msg.command, value)?
@@ -191,7 +194,10 @@ fn handle_from_local_prepare_item(msg Message, mut r redisclient.Redis, value st
 	update.twin_src = config.myid
 	update.twin_dst = [dst]
 
-	println("resolving twin: $dst")
+	if config.debug > 0 {
+		println("[+] resolving twin: $dst")
+	}
+
 	mut dest := resolver(u32(dst)) or {
 		println("unknown twin")
 		update.err = "unknown twin destination"
@@ -218,7 +224,9 @@ fn handle_from_local_prepare_item(msg Message, mut r redisclient.Redis, value st
 	update.id = "${dst}.${id}"
 	update.retqueue = "msgbus.system.reply"
 
-	println("forwarding to $dest")
+	if config.debug > 0 {
+		println("[+] forwarding to $dest")
+	}
 
 	output := json.encode(update)
 	response := http.post("http://$dest:8051/zbus-remote", output) or {
@@ -227,8 +235,10 @@ fn handle_from_local_prepare_item(msg Message, mut r redisclient.Redis, value st
 		return
 	}
 
-	println("[+] message sent to target msgbus")
-	println(response)
+	if config.debug > 0 {
+		println("[+] message sent to target msgbus")
+		println(response)
+	}
 
 	/* LEGACY
 	mut rr := redisclient.connect(dest)?
@@ -243,7 +253,9 @@ fn handle_from_local_prepare_item(msg Message, mut r redisclient.Redis, value st
 }
 
 fn handle_from_local_prepare(msg Message, mut r redisclient.Redis, value string, config MBusCtx) ? {
-	println("original return queue: $msg.retqueue")
+	if config.debug > 0 {
+		println("original return queue: $msg.retqueue")
+	}
 
 	for dst in msg.twin_dst {
 		handle_from_local_prepare_item(msg, mut r, value, config, dst)?
@@ -266,7 +278,9 @@ fn handle_from_local(mut r redisclient.Redis, value string, config MBusCtx) ? {
 		return
 	}
 
-	println(msg)
+	if config.debug > 0 {
+		println(msg)
+	}
 
 	if msg.id == "" {
 		handle_from_local_prepare(msg, mut r, value, config)?
@@ -296,8 +310,10 @@ fn handle_internal_hgetall(lines []resp2.RValue) []HSetEntry {
 	return entries
 }
 
-fn handle_scrubbing(mut r redisclient.Redis) ? {
-	println("[+] scrubbing")
+fn handle_scrubbing(mut r redisclient.Redis, config MBusCtx) ? {
+	if config.debug > 0 {
+		println("[+] scrubbing")
+	}
 
 	lines := r.hgetall("msgbus.system.backlog")?
 	mut entries := handle_internal_hgetall(lines)
@@ -312,7 +328,9 @@ fn handle_scrubbing(mut r redisclient.Redis) ? {
 		}
 
 		if entry.value.epoch + entry.value.expiration > now {
-			println("[+] expired: $entry.key")
+			if config.debug > 0 {
+				println("[+] expired: $entry.key")
+			}
 
 			entry.value.err = "request timeout (expiration reached, $entry.value.expiration seconds)"
 			output := json.encode(entry.value)
@@ -324,7 +342,9 @@ fn handle_scrubbing(mut r redisclient.Redis) ? {
 }
 
 fn handle_retry(mut r redisclient.Redis, config MBusCtx) ? {
-	println("[+] checking retries")
+	if config.debug > 0 {
+		println("[+] checking retries")
+	}
 
 	lines := r.hgetall("msgbus.system.retry")?
 	mut entries := handle_internal_hgetall(lines)
@@ -367,13 +387,12 @@ fn runweb(config MBusCtx) {
 	vweb.run(app, 8051)
 }
 
-pub fn run_server(myid int, redis_addres string) ? {
+pub fn run_server(myid int, redis_addres string, debug int) ? {
 	config := MBusCtx{
 		myid: myid,
-		raddr: redis_addres
+		raddr: redis_addres,
+		debug: debug,
 	}
-
-	// gconfig = config
 
 	println("[+] twin id: $myid")
 
@@ -384,13 +403,16 @@ pub fn run_server(myid int, redis_addres string) ? {
 	mut r := redisclient.connect(config.raddr)?
 
 	println("[+] server: waiting requests")
+
 	for {
-		println("[+] cycle waiting")
+		if config.debug > 0 {
+			println("[+] cycle waiting")
+		}
 
 		m := r.blpop(["msgbus.system.local", "msgbus.system.remote", "msgbus.system.reply"], "1")?
 
 		if m.len == 0 {
-			handle_scrubbing(mut r)?
+			handle_scrubbing(mut r, config)?
 			handle_retry(mut r, config)?
 			continue
 		}
@@ -413,8 +435,10 @@ pub fn run_server(myid int, redis_addres string) ? {
 
 ['/zbus-remote'; post]
 pub fn (mut app App) zbus_web_remote() vweb.Result {
-	println("[+] request from external agent")
-	println(app.req.data)
+	if app.config.debug > 0 {
+		println("[+] request from external agent")
+		println(app.req.data)
+	}
 
 	_ := json.decode(Message, app.req.data) or {
 		return app.json('{"status": "error", "error": "could not parse message request"}')
@@ -434,8 +458,10 @@ pub fn (mut app App) zbus_web_remote() vweb.Result {
 
 ['/zbus-reply'; post]
 pub fn (mut app App) zbus_web_reply() vweb.Result {
-	println("[+] reply from external agent")
-	println(app.req.data)
+	if app.config.debug > 0 {
+		println("[+] reply from external agent")
+		println(app.req.data)
+	}
 
 	_ := json.decode(Message, app.req.data) or {
 		return app.json('{"status": "error", "error": "could not parse message request"}')

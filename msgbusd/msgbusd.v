@@ -22,5 +22,5 @@ fn main() {
 		redis_addr = os.args[2]
 	}
 
-	server.run_server(myid, redis_addr) or { panic("Can't run msgbus server: $err") }
+	server.run_server(myid, redis_addr, 0) or { panic("Can't run msgbus server: $err") }
 }
