@@ -1,5 +1,19 @@
 # Reliable Message Bus Protocol
 
+## Server
+
+To run `msgbusd` (msgbus daemon) which is the server (aka agent) running to process messages, you can use
+the following:
+```
+msgbusd <twin-id> [redis-address]
+```
+
+- The `twin-id` is mendatory and will be used to identify messagebus identifier
+- The redis address can be used to specify a running redis server, it can be an address
+(eg: `127.0.0.1:6379`, this is the default value) or a unix socket (eg: `/var/run/redis.sock`)
+
+## Specification
+
 Object Schema:
 ```js
 {
@@ -24,7 +38,7 @@ Note, on this documentation, `local side` mean the digitaltwin/bus process where
 The `remote side` is where the destination is. In practice, this can be the same twin (for inter-process
 communication, for example). Queue usage are made to allow this.
 
-# Sending a request
+### Sending a request
 
 To send a request (aka call a remote function), you push your request (the json above) to your
 local redis `msgbus.system.local` queue using `RPUSH` command.
@@ -34,7 +48,7 @@ of destination requested (here, only one: `1002`), so only a single response sho
 
 Responses arrives one by one.
 
-# Processing a request
+### Processing a request
 
 The ZBus process is waiting on `msgbus.system.local` for incoming messages. As soon as a message is received,
 the bus process resolve destinations id (fetch ip/port from tfgrid), then forward the request to destination
@@ -82,7 +96,7 @@ A copy of this request is stored in local redis `HSET msgbus.system.backlog` wit
 backlog is used to match reply with corresponding original request, to ensure reply comes from a legitim request
 and save original reply queue.
 
-# Processing a request on the remote side
+### Processing a request on the remote side
 
 On the remote side, a local redis and another `ZBus Process` is running. The `ZBus Process` is waiting event on
 HTTP POST `/zbus-remote` and will transfert legit request to local redis queue `msgbus.system.remote`.
@@ -94,7 +108,7 @@ queue to process the request and send the reply to the `msgbus.system.reply` loc
 The application should swap `dst` and `src`, set the `dat` with response payload (base64 encoded) and update
 `now` field with response time.
 
-# Processing a reply, on the remote side
+### Processing a reply, on the remote side
 
 When a reply is found by `ZBus Process` on the remote side, in the queue `msgbus.system.reply`, this message
 is extracted from the queue.
@@ -102,7 +116,7 @@ is extracted from the queue.
 Because the destination id doesn't match with the local id, the message is forwarded **as it** to `dst`
 server (resolved), over HTTP POST `/zbus-reply`.
 
-# Processing a reply, on the local side
+### Processing a reply, on the local side
 
 When receiving a message over HTTP POST `/zbus-reply`, the legit request is copied into `msgbus.system.reply` queue
 and will be parsed by main redis task. The same way as remote side, when a message will be found on
@@ -113,7 +127,7 @@ The `uid` from that reply is used to fetch back the original message from the `H
 allow the process to find back the original `ret` queue. The `ret` is replaced with original value and this
 message is then forwarded to that specific queue.
 
-# The response is available on the return queue
+### The response is available on the return queue
 
 Source application now get the reply message on it's expected queue.
 
@@ -134,6 +148,6 @@ Source application now get the reply message on it's expected queue.
 }
 ```
 
-# Schema
+### Schema
 
 ![Schema](zbus.png)
