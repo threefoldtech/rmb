@@ -5,12 +5,19 @@
 To run `msgbusd` (msgbus daemon) which is the server (aka agent) running to process messages, you can use
 the following:
 ```
-msgbusd <twin-id> [redis-address]
+msgbusd --twin <twin-id>
+```
+
+More options are available:
+```
+  --redis [redis-endpoint]
+  --substrate [substrate-http]
 ```
 
 - The `twin-id` is mendatory and will be used to identify messagebus identifier
 - The redis address can be used to specify a running redis server, it can be an address
 (eg: `127.0.0.1:6379`, this is the default value) or a unix socket (eg: `/var/run/redis.sock`)
+- The substrate argument should be a valid http webservice made to query substrate db
 
 ## Specification
 
