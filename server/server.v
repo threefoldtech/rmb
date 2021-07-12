@@ -35,6 +35,7 @@ mut:
 	debug int        // debug level
 	raddr string     // redis address
 	myid int         // local twin id
+	subaddr string   // substrate url
 }
 
 struct App {
@@ -387,11 +388,12 @@ fn runweb(config MBusCtx) {
 	vweb.run(app, 8051)
 }
 
-pub fn run_server(myid int, redis_addres string, debug int) ? {
+pub fn run_server(myid int, redis_addres string, substrate string, debug int) ? {
 	config := MBusCtx{
 		myid: myid,
 		raddr: redis_addres,
 		debug: debug,
+		subaddr: substrate,
 	}
 
 	println("[+] twin id: $myid")
