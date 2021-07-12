@@ -6,7 +6,6 @@ import vweb
 import net.http
 import despiegk.crystallib.resp2
 import despiegk.crystallib.redisclient
-import threefoldtech.vgrid.tfgriddb
 
 pub struct Message {
 pub mut:
@@ -28,6 +27,14 @@ pub struct HSetEntry {
 	key string
 mut:
 	value Message
+}
+
+struct SubstrateTwin {
+pub mut:
+	version int [json: Version]
+	id int [json: ID]
+	account string [json: Account]
+	ip string [json: IP]
 }
 
 struct MBusCtx {
@@ -63,12 +70,12 @@ fn validate_input(msg Message) ? {
 	}
 }
 
-fn handle_from_reply_forward(msg Message, mut r redisclient.Redis, value string) ? {
+fn handle_from_reply_forward(msg Message, mut r redisclient.Redis, config MBusCtx, value string) ? {
 	// reply have only one destination (source)
 	dst := msg.twin_dst[0]
 
 	println("resolving twin: $dst")
-	mut dest := resolver(u32(dst)) or {
+	mut dest := resolver(config, u32(dst)) or {
 		println("unknown twin, drop")
 		return
 	}
@@ -137,7 +144,7 @@ fn handle_from_reply(mut r redisclient.Redis, value string, config MBusCtx) ? {
 		handle_from_reply_for_me(msg, mut r, value)?
 
 	} else if msg.twin_src == config.myid {
-		handle_from_reply_forward(msg, mut r, value)?
+		handle_from_reply_forward(msg, mut r, config, value)?
 	}
 }
 
@@ -199,7 +206,7 @@ fn handle_from_local_prepare_item(msg Message, mut r redisclient.Redis, value st
 		println("[+] resolving twin: $dst")
 	}
 
-	mut dest := resolver(u32(dst)) or {
+	mut dest := resolver(config, u32(dst)) or {
 		println("unknown twin")
 		update.err = "unknown twin destination"
 		output := json.encode(update)
@@ -369,15 +376,21 @@ fn handle_retry(mut r redisclient.Redis, config MBusCtx) ? {
 	}
 }
 
-fn resolver(twinid u32) ? string {
-	mut db := tfgriddb.tfgrid_new()?
-	twin := db.twin_get_by_id(twinid)?
+fn resolver(config MBusCtx, twinid u32) ? string {
+	url := "$config.subaddr/twin/$twinid"
+	// println(url)
 
-	if twin.id == 0 {
-		return error("twin not found")
+	req := http.get(url)?
+	if req.status_code != 200 {
+		return error("http error: $req.status_code")
 	}
 
-	return twin.ip
+	info := json.decode(SubstrateTwin, req.text) or {
+		println("decode failed substrate response")
+		return error("malformed substrate response")
+	}
+
+	return info.ip
 }
 
 fn runweb(config MBusCtx) {
