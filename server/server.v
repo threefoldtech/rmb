@@ -403,6 +403,13 @@ pub fn run_server(myid int, redis_addres string, substrate string, debug int) ? 
 
 	println("[+] connecting to redis: $config.raddr")
 	mut r := redisclient.connect(config.raddr)?
+	r.ping() or {
+		println("[-] could not connect to redis server")
+		println(err)
+		exit(1)
+	}
+
+	println("[+] substrate url: $config.subaddr")
 
 	println("[+] server: waiting requests")
 
