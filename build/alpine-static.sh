@@ -20,4 +20,5 @@ git clone https://github.com/crystaluniverse/crystallib /root/.vmodules/despiegk
 
 cd /root/.vmodules/threefoldtech/rmb/msgbusd
 v -cc gcc -cflags -static msgbusd.v
+
 strip -s msgbusd
