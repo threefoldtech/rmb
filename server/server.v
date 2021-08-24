@@ -19,7 +19,7 @@ pub mut:
 	twin_dst []int [json: dst]    // twinid of destination, can be more than one
 	retqueue string [json: ret]   // return queue name where to send reply
 	schema string [json: shm]     // schema to define payload, later could enforce payload
-	epoch int [json: now]         // unix timestamp when request were created
+	epoch i64 [json: now]         // unix timestamp when request were created
 	err string [json: err]        // optional error message if any
 }
 
