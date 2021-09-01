@@ -1,16 +1,12 @@
 module twinclient
-import threefoldtech.rmb.client { MessageBusClient }
+import threefoldtech.rmb.client { MessageBusClient, prepare}
 import threefoldtech.rmb.server { Message }
 import despiegk.crystallib.redisclient
-import despiegk.crystallib.resp2
 import encoding.base64
-import rand
-import time
-import json
 
 pub struct TwinClient{
-	MessageBusClient
 pub mut:
+	mb MessageBusClient
 	msg_param MsgParameters
 }
 
@@ -30,11 +26,10 @@ pub fn new(redis_server string, dest int) ?TwinClient {
 		Output:
 			- TwinClient: new TwinClient instance
 	*/
-	mut dest_arr := [dest]
 	return TwinClient{
-		client: redisclient.connect(redis_server) ?
+		mb: MessageBusClient{client: redisclient.connect(redis_server) ?}
 		msg_param: MsgParameters{
-			destination: dest_arr
+			destination: [dest]
 		}
 	}
 }
@@ -49,22 +44,9 @@ pub fn (mut twin TwinClient) send (command string, payload string) ?Message {
 		Output:
 			- Message: prepared msg that have been sent
 	*/
-	msg := Message{
-		version: 1
-		id: ""
-		command: command
-		expiration: twin.msg_param.expire
-		retry: twin.msg_param.retries
-		data: base64.encode_str(payload)
-		twin_src: 0
-		twin_dst: twin.msg_param.destination
-		retqueue: rand.uuid_v4()
-		schema: ""
-		epoch: time.now().unix_time()
-		err: ""
-	}
-	request := json.encode_pretty(msg)
-	twin.client.lpush("msgbus.system.local", request) ?
+	mut msg := prepare(command, twin.msg_param.destination, twin.msg_param.expire, twin.msg_param.retries)
+	twin.mb.send(msg, payload)
+	msg.data = base64.encode_str(payload)
 	return msg
 }
 
@@ -76,10 +58,5 @@ pub fn (mut twin TwinClient) read (msg Message) Message {
 		Output:
 			- Message: prepared msg that have the response.
 	*/
-	println('Waiting reply $msg.retqueue')
-	results := twin.client.blpop([msg.retqueue], '0') or { panic(err) }
-	response_json := resp2.get_redis_value(results[1])
-	mut response := json.decode(Message, response_json) or {panic(err)}
-	response.data = base64.decode_str(response.data)
-	return response
+	return twin.mb.read(msg)[0]
 }
