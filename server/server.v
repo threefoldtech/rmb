@@ -335,7 +335,7 @@ fn handle_scrubbing(mut r redisclient.Redis, config MBusCtx) ? {
 			entry.value.expiration = 3600
 		}
 
-		if entry.value.epoch + entry.value.expiration > now {
+		if entry.value.epoch + entry.value.expiration < now {
 			if config.debug > 0 {
 				println("[+] expired: $entry.key")
 			}
