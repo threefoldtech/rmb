@@ -7,7 +7,7 @@ import os
 fn main() {
 	cmd_twin := cmdline.option(os.args, "--twin", "")
 	cmd_redis := cmdline.option(os.args, "--redis", "127.0.0.1:6379")
-	cmd_sub := cmdline.option(os.args, "--substrate", "https://explorer.devnet.grid.tf/")
+	cmd_sub := cmdline.option(os.args, "--substrate", "https://graphql.dev.grid.tf/graphql")
 	cmd_debug := cmdline.option(os.args, "--debug", "none")
 
 	if cmd_twin == "" {
@@ -20,7 +20,7 @@ fn main() {
 		println("")
 		println("  [required] --twin local twin id")
 		println("  [optional] --redis target can be host:port or unix socket path")
-		println("  [optional] --substrate alternative base url can be specified")
+		println("  [optional] --substrate alternative graphql endpoint")
 		println("  [optional] --debug none or all to enable extra debug")
 		println("")
 		exit(1)
@@ -31,6 +31,12 @@ fn main() {
 
 	if cmd_debug == "all" {
 		debug = 1
+	}
+
+	if cmd_sub.starts_with("ws") {
+		eprintln("Cannot use websocket substrate, https graphql required")
+		eprintln("Eg: https://graphql.dev.grid.tf/graphql")
+		exit(1)
 	}
 
 	server.run_server(myid, cmd_redis, cmd_sub, debug) or { panic("Can't run msgbus server: $err") }

@@ -6,6 +6,7 @@ import vweb
 import net.http
 import despiegk.crystallib.resp2
 import despiegk.crystallib.redisclient
+import threefoldtech.vgrid.tfgriddb
 
 pub struct Message {
 pub mut:
@@ -29,20 +30,13 @@ mut:
 	value Message
 }
 
-struct SubstrateTwin {
-pub mut:
-	version int [json: Version]
-	id int [json: ID]
-	account string [json: Account]
-	ip string [json: IP]
-}
-
 struct MBusCtx {
 mut:
-	debug int        // debug level
-	raddr string     // redis address
-	myid int         // local twin id
-	subaddr string   // substrate url
+	debug    int        // debug level
+	raddr    string     // redis address
+	myid     int         // local twin id
+	subaddr  string   // substrate (graphql) url
+	grid     tfgriddb.Explorer
 }
 
 struct App {
@@ -70,12 +64,12 @@ fn validate_input(msg Message) ? {
 	}
 }
 
-fn handle_from_reply_forward(msg Message, mut r redisclient.Redis, config MBusCtx, value string) ? {
+fn handle_from_reply_forward(msg Message, mut r redisclient.Redis, mut config MBusCtx, value string) ? {
 	// reply have only one destination (source)
 	dst := msg.twin_dst[0]
 
 	println("resolving twin: $dst")
-	mut dest := resolver(config, u32(dst)) or {
+	mut dest := resolver(mut config, u32(dst)) or {
 		println("unknown twin, drop")
 		return
 	}
@@ -124,7 +118,7 @@ fn handle_from_reply_for_me(msg Message, mut r redisclient.Redis, value string) 
 	r.hdel("msgbus.system.backlog", msg.id)?
 }
 
-fn handle_from_reply(mut r redisclient.Redis, value string, config MBusCtx) ? {
+fn handle_from_reply(mut r redisclient.Redis, value string, mut config MBusCtx) ? {
 	msg := json.decode(Message, value) or {
 		println("decode failed")
 		return
@@ -144,7 +138,7 @@ fn handle_from_reply(mut r redisclient.Redis, value string, config MBusCtx) ? {
 		handle_from_reply_for_me(msg, mut r, value)?
 
 	} else if msg.twin_src == config.myid {
-		handle_from_reply_forward(msg, mut r, config, value)?
+		handle_from_reply_forward(msg, mut r, mut config, value)?
 	}
 }
 
@@ -193,7 +187,7 @@ fn request_needs_retry(msg Message, mut update Message, mut r redisclient.Redis)
 	r.hset("msgbus.system.retry", update.id, value)?
 }
 
-fn handle_from_local_prepare_item(msg Message, mut r redisclient.Redis, value string, config MBusCtx, dst int) ? {
+fn handle_from_local_prepare_item(msg Message, mut r redisclient.Redis, value string, mut config MBusCtx, dst int) ? {
 	mut update := json.decode(Message, value) or {
 		println("decode failed")
 		return
@@ -206,7 +200,7 @@ fn handle_from_local_prepare_item(msg Message, mut r redisclient.Redis, value st
 		println("[+] resolving twin: $dst")
 	}
 
-	mut dest := resolver(config, u32(dst)) or {
+	mut dest := resolver(mut config, u32(dst)) or {
 		println("unknown twin")
 		update.err = "unknown twin destination"
 		output := json.encode(update)
@@ -260,21 +254,21 @@ fn handle_from_local_prepare_item(msg Message, mut r redisclient.Redis, value st
 	r.hset("msgbus.system.backlog", update.id, value)?
 }
 
-fn handle_from_local_prepare(msg Message, mut r redisclient.Redis, value string, config MBusCtx) ? {
+fn handle_from_local_prepare(msg Message, mut r redisclient.Redis, value string, mut config MBusCtx) ? {
 	if config.debug > 0 {
 		println("original return queue: $msg.retqueue")
 	}
 
 	for dst in msg.twin_dst {
-		handle_from_local_prepare_item(msg, mut r, value, config, dst)?
+		handle_from_local_prepare_item(msg, mut r, value, mut config, dst)?
 	}
 }
 
-fn handle_from_local_return(msg Message, mut r redisclient.Redis, value string, config MBusCtx) ? {
+fn handle_from_local_return(msg Message, mut r redisclient.Redis, value string, mut config MBusCtx) ? {
 	println("---")
 }
 
-fn handle_from_local(mut r redisclient.Redis, value string, config MBusCtx) ? {
+fn handle_from_local(mut r redisclient.Redis, value string, mut config MBusCtx) ? {
 	msg := json.decode(Message, value) or {
 		println("decode failed")
 		return
@@ -291,10 +285,10 @@ fn handle_from_local(mut r redisclient.Redis, value string, config MBusCtx) ? {
 	}
 
 	if msg.id == "" {
-		handle_from_local_prepare(msg, mut r, value, config)?
+		handle_from_local_prepare(msg, mut r, value, mut config)?
 	} else {
 		// FIXME: not used, not needed ?
-		handle_from_local_return(msg, mut r, value, config)?
+		handle_from_local_return(msg, mut r, value, mut config)?
 	}
 }
 
@@ -318,7 +312,7 @@ fn handle_internal_hgetall(lines []resp2.RValue) []HSetEntry {
 	return entries
 }
 
-fn handle_scrubbing(mut r redisclient.Redis, config MBusCtx) ? {
+fn handle_scrubbing(mut r redisclient.Redis, mut config MBusCtx) ? {
 	if config.debug > 0 {
 		println("[+] scrubbing")
 	}
@@ -349,7 +343,7 @@ fn handle_scrubbing(mut r redisclient.Redis, config MBusCtx) ? {
 	}
 }
 
-fn handle_retry(mut r redisclient.Redis, config MBusCtx) ? {
+fn handle_retry(mut r redisclient.Redis, mut config MBusCtx) ? {
 	if config.debug > 0 {
 		println("[+] checking retries")
 	}
@@ -371,26 +365,14 @@ fn handle_retry(mut r redisclient.Redis, config MBusCtx) ? {
 
 			// re-call sending function, which will succeed
 			// or put it back to retry
-			handle_from_local_prepare_item(entry.value, mut r, value, config, entry.value.twin_dst[0])?
+			handle_from_local_prepare_item(entry.value, mut r, value, mut config, entry.value.twin_dst[0])?
 		}
 	}
 }
 
-fn resolver(config MBusCtx, twinid u32) ? string {
-	url := "$config.subaddr/twin/$twinid"
-	// println(url)
-
-	req := http.get(url)?
-	if req.status_code != 200 {
-		return error("http error: $req.status_code")
-	}
-
-	info := json.decode(SubstrateTwin, req.text) or {
-		println("decode failed substrate response")
-		return error("malformed substrate response")
-	}
-
-	return info.ip
+fn resolver(mut config MBusCtx, twinid u32) ? string {
+	twin := config.grid.twin_by_id(twinid)?
+	return twin.ip
 }
 
 fn runweb(config MBusCtx) {
@@ -402,11 +384,14 @@ fn runweb(config MBusCtx) {
 }
 
 pub fn run_server(myid int, redis_addres string, substrate string, debug int) ? {
-	config := MBusCtx{
+	mut grid := tfgriddb.explorer_new()?
+
+	mut config := MBusCtx{
 		myid: myid,
 		raddr: redis_addres,
 		debug: debug,
 		subaddr: substrate,
+		grid: grid,
 	}
 
 	println("[+] twin id: $myid")
@@ -434,19 +419,19 @@ pub fn run_server(myid int, redis_addres string, substrate string, debug int) ? 
 		m := r.blpop(["msgbus.system.local", "msgbus.system.remote", "msgbus.system.reply"], "1")?
 
 		if m.len == 0 {
-			handle_scrubbing(mut r, config)?
-			handle_retry(mut r, config)?
+			handle_scrubbing(mut r, mut config)?
+			handle_retry(mut r, mut config)?
 			continue
 		}
 
 		value := resp2.get_redis_value(m[1])
 
 		if resp2.get_redis_value(m[0]) == "msgbus.system.reply" {
-			handle_from_reply(mut r, value, config)?
+			handle_from_reply(mut r, value, mut config)?
 		}
 
 		if resp2.get_redis_value(m[0]) == "msgbus.system.local" {
-			handle_from_local(mut r, value, config)?
+			handle_from_local(mut r, value, mut config)?
 		}
 
 		if resp2.get_redis_value(m[0]) == "msgbus.system.remote" {
