@@ -30,7 +30,7 @@ mut:
 	value Message
 }
 
-struct MBusCtx {
+struct MBusSrv {
 mut:
 	debug    int        // debug level
 	raddr    string     // redis address
@@ -43,10 +43,10 @@ struct App {
 	vweb.Context
 mut:
 	redis redisclient.Redis
-	config shared MBusCtx
+	config shared MBusSrv
 }
 
-fn validate_input(msg Message) ? {
+fn (msg Message) validate() ? {
 	if msg.version != 1 {
 		return error("protocol version mismatch")
 	}
@@ -64,12 +64,12 @@ fn validate_input(msg Message) ? {
 	}
 }
 
-fn handle_from_reply_forward(msg Message, mut r redisclient.Redis, mut config MBusCtx, value string) ? {
+fn (mut ctx MBusSrv) handle_from_reply_forward(msg Message, mut r redisclient.Redis, value string) ? {
 	// reply have only one destination (source)
 	dst := msg.twin_dst[0]
 
 	println("resolving twin: $dst")
-	mut dest := resolver(mut config, u32(dst)) or {
+	mut dest := ctx.resolver(u32(dst)) or {
 		println("unknown twin, drop")
 		return
 	}
@@ -94,7 +94,7 @@ fn handle_from_reply_forward(msg Message, mut r redisclient.Redis, mut config MB
 	println(response)
 }
 
-fn handle_from_reply_for_me(msg Message, mut r redisclient.Redis, value string) ? {
+fn (mut ctx MBusSrv) handle_from_reply_for_me(msg Message, mut r redisclient.Redis, value string) ? {
 	println("[+] message reply for me, fetching backlog")
 
 	retval := r.hget("msgbus.system.backlog", msg.id)?
@@ -118,32 +118,32 @@ fn handle_from_reply_for_me(msg Message, mut r redisclient.Redis, value string) 
 	r.hdel("msgbus.system.backlog", msg.id)?
 }
 
-fn handle_from_reply(mut r redisclient.Redis, value string, mut config MBusCtx) ? {
+fn (mut ctx MBusSrv) handle_from_reply(mut r redisclient.Redis, value string) ? {
 	msg := json.decode(Message, value) or {
 		println("decode failed")
 		return
 	}
 
-	if config.debug > 0 {
+	if ctx.debug > 0 {
 		println(msg)
 	}
 
-	validate_input(msg) or {
+	msg.validate() or {
 		println("reply: could not validate input")
 		println(err)
 		return
 	}
 
-	if msg.twin_dst[0] == config.myid {
-		handle_from_reply_for_me(msg, mut r, value)?
+	if msg.twin_dst[0] == ctx.myid {
+		ctx.handle_from_reply_for_me(msg, mut r, value)?
 
-	} else if msg.twin_src == config.myid {
-		handle_from_reply_forward(msg, mut r, mut config, value)?
+	} else if msg.twin_src == ctx.myid {
+		ctx.handle_from_reply_forward(msg, mut r, value)?
 	}
 }
 
 
-fn handle_from_remote(mut r redisclient.Redis, value string) ? {
+fn (mut ctx MBusSrv) handle_from_remote(mut r redisclient.Redis, value string) ? {
 	msg := json.decode(Message, value) or {
 		println("decode failed")
 		return
@@ -151,7 +151,7 @@ fn handle_from_remote(mut r redisclient.Redis, value string) ? {
 
 	// println(msg)
 
-	validate_input(msg) or {
+	msg.validate() or {
 		println("remote: could not validate input")
 		println(err)
 		return
@@ -163,7 +163,7 @@ fn handle_from_remote(mut r redisclient.Redis, value string) ? {
 	r.lpush("msgbus." + msg.command, value)?
 }
 
-fn request_needs_retry(msg Message, mut update Message, mut r redisclient.Redis) ? {
+fn (mut ctx MBusSrv) request_needs_retry(msg Message, mut update Message, mut r redisclient.Redis) ? {
 	println("[-] could not send message to remote msgbus")
 
 	// restore 'update' to original state
@@ -187,20 +187,20 @@ fn request_needs_retry(msg Message, mut update Message, mut r redisclient.Redis)
 	r.hset("msgbus.system.retry", update.id, value)?
 }
 
-fn handle_from_local_prepare_item(msg Message, mut r redisclient.Redis, value string, mut config MBusCtx, dst int) ? {
+fn (mut ctx MBusSrv) handle_from_local_prepare_item(msg Message, mut r redisclient.Redis, value string, dst int) ? {
 	mut update := json.decode(Message, value) or {
 		println("decode failed")
 		return
 	}
 
-	update.twin_src = config.myid
+	update.twin_src = ctx.myid
 	update.twin_dst = [dst]
 
-	if config.debug > 0 {
+	if ctx.debug > 0 {
 		println("[+] resolving twin: $dst")
 	}
 
-	mut dest := resolver(mut config, u32(dst)) or {
+	mut dest := ctx.resolver(u32(dst)) or {
 		println("unknown twin")
 		update.err = "unknown twin destination"
 		output := json.encode(update)
@@ -226,18 +226,18 @@ fn handle_from_local_prepare_item(msg Message, mut r redisclient.Redis, value st
 	update.id = "${dst}.${id}"
 	update.retqueue = "msgbus.system.reply"
 
-	if config.debug > 0 {
+	if ctx.debug > 0 {
 		println("[+] forwarding to $dest")
 	}
 
 	output := json.encode(update)
 	response := http.post("http://$dest:8051/zbus-remote", output) or {
 		eprintln(err)
-		request_needs_retry(msg, mut update, mut r)?
+		ctx.request_needs_retry(msg, mut update, mut r)?
 		return
 	}
 
-	if config.debug > 0 {
+	if ctx.debug > 0 {
 		println("[+] message sent to target msgbus")
 		println(response)
 	}
@@ -254,45 +254,45 @@ fn handle_from_local_prepare_item(msg Message, mut r redisclient.Redis, value st
 	r.hset("msgbus.system.backlog", update.id, value)?
 }
 
-fn handle_from_local_prepare(msg Message, mut r redisclient.Redis, value string, mut config MBusCtx) ? {
-	if config.debug > 0 {
+fn (mut ctx MBusSrv) handle_from_local_prepare(msg Message, mut r redisclient.Redis, value string) ? {
+	if ctx.debug > 0 {
 		println("original return queue: $msg.retqueue")
 	}
 
 	for dst in msg.twin_dst {
-		handle_from_local_prepare_item(msg, mut r, value, mut config, dst)?
+		ctx.handle_from_local_prepare_item(msg, mut r, value, dst)?
 	}
 }
 
-fn handle_from_local_return(msg Message, mut r redisclient.Redis, value string, mut config MBusCtx) ? {
+fn (mut ctx MBusSrv) handle_from_local_return(msg Message, mut r redisclient.Redis, value string) ? {
 	println("---")
 }
 
-fn handle_from_local(mut r redisclient.Redis, value string, mut config MBusCtx) ? {
+fn (mut ctx MBusSrv) handle_from_local(mut r redisclient.Redis, value string) ? {
 	msg := json.decode(Message, value) or {
 		println("decode failed")
 		return
 	}
 
-	validate_input(msg) or {
+	msg.validate() or {
 		println("local: could not validate input")
 		println(err)
 		return
 	}
 
-	if config.debug > 0 {
+	if ctx.debug > 0 {
 		println(msg)
 	}
 
 	if msg.id == "" {
-		handle_from_local_prepare(msg, mut r, value, mut config)?
+		ctx.handle_from_local_prepare(msg, mut r, value)?
 	} else {
 		// FIXME: not used, not needed ?
-		handle_from_local_return(msg, mut r, value, mut config)?
+		ctx.handle_from_local_return(msg, mut r, value)?
 	}
 }
 
-fn handle_internal_hgetall(lines []resp2.RValue) []HSetEntry {
+fn (mut ctx MBusSrv) handle_internal_hgetall(lines []resp2.RValue) []HSetEntry {
 	mut entries := []HSetEntry{}
 
 	// build usable list from redis response
@@ -312,13 +312,13 @@ fn handle_internal_hgetall(lines []resp2.RValue) []HSetEntry {
 	return entries
 }
 
-fn handle_scrubbing(mut r redisclient.Redis, mut config MBusCtx) ? {
-	if config.debug > 0 {
+fn (mut ctx MBusSrv) handle_scrubbing(mut r redisclient.Redis) ? {
+	if ctx.debug > 0 {
 		println("[+] scrubbing")
 	}
 
 	lines := r.hgetall("msgbus.system.backlog")?
-	mut entries := handle_internal_hgetall(lines)
+	mut entries := ctx.handle_internal_hgetall(lines)
 
 	now := time.now().unix_time()
 
@@ -330,7 +330,7 @@ fn handle_scrubbing(mut r redisclient.Redis, mut config MBusCtx) ? {
 		}
 
 		if entry.value.epoch + entry.value.expiration < now {
-			if config.debug > 0 {
+			if ctx.debug > 0 {
 				println("[+] expired: $entry.key")
 			}
 
@@ -343,13 +343,13 @@ fn handle_scrubbing(mut r redisclient.Redis, mut config MBusCtx) ? {
 	}
 }
 
-fn handle_retry(mut r redisclient.Redis, mut config MBusCtx) ? {
-	if config.debug > 0 {
+fn (mut ctx MBusSrv) handle_retry(mut r redisclient.Redis) ? {
+	if ctx.debug > 0 {
 		println("[+] checking retries")
 	}
 
 	lines := r.hgetall("msgbus.system.retry")?
-	mut entries := handle_internal_hgetall(lines)
+	mut entries := ctx.handle_internal_hgetall(lines)
 
 	now := time.now().unix_time()
 
@@ -365,17 +365,17 @@ fn handle_retry(mut r redisclient.Redis, mut config MBusCtx) ? {
 
 			// re-call sending function, which will succeed
 			// or put it back to retry
-			handle_from_local_prepare_item(entry.value, mut r, value, mut config, entry.value.twin_dst[0])?
+			ctx.handle_from_local_prepare_item(entry.value, mut r, value, entry.value.twin_dst[0])?
 		}
 	}
 }
 
-fn resolver(mut config MBusCtx, twinid u32) ? string {
-	twin := config.grid.twin_by_id(twinid)?
+fn (mut ctx MBusSrv) resolver(twinid u32) ? string {
+	twin := ctx.grid.twin_by_id(twinid)?
 	return twin.ip
 }
 
-fn runweb(config MBusCtx) {
+fn runweb(config MBusSrv) {
 	app := App{
 		config: config,
 	}
@@ -386,7 +386,7 @@ fn runweb(config MBusCtx) {
 pub fn run_server(myid int, redis_addres string, substrate string, debug int) ? {
 	mut grid := tfgriddb.explorer_new()?
 
-	mut config := MBusCtx{
+	mut srv := MBusSrv{
 		myid: myid,
 		raddr: redis_addres,
 		debug: debug,
@@ -397,45 +397,45 @@ pub fn run_server(myid int, redis_addres string, substrate string, debug int) ? 
 	println("[+] twin id: $myid")
 
 	println('[+] initializing agent server')
-	go runweb(config)
+	go runweb(srv)
 
-	println("[+] connecting to redis: $config.raddr")
-	mut r := redisclient.connect(config.raddr)?
+	println("[+] connecting to redis: $srv.raddr")
+	mut r := redisclient.connect(srv.raddr)?
 	r.ping() or {
 		println("[-] could not connect to redis server")
 		println(err)
 		exit(1)
 	}
 
-	println("[+] substrate url: $config.subaddr")
+	println("[+] substrate url: $srv.subaddr")
 
 	println("[+] server: waiting requests")
 
 	for {
-		if config.debug > 0 {
+		if srv.debug > 0 {
 			println("[+] cycle waiting")
 		}
 
 		m := r.blpop(["msgbus.system.local", "msgbus.system.remote", "msgbus.system.reply"], "1")?
 
 		if m.len == 0 {
-			handle_scrubbing(mut r, mut config)?
-			handle_retry(mut r, mut config)?
+			srv.handle_scrubbing(mut r)?
+			srv.handle_retry(mut r)?
 			continue
 		}
 
 		value := resp2.get_redis_value(m[1])
 
 		if resp2.get_redis_value(m[0]) == "msgbus.system.reply" {
-			handle_from_reply(mut r, value, mut config)?
+			srv.handle_from_reply(mut r, value)?
 		}
 
 		if resp2.get_redis_value(m[0]) == "msgbus.system.local" {
-			handle_from_local(mut r, value, mut config)?
+			srv.handle_from_local(mut r, value)?
 		}
 
 		if resp2.get_redis_value(m[0]) == "msgbus.system.remote" {
-			handle_from_remote(mut r, value)?
+			srv.handle_from_remote(mut r, value)?
 		}
 	}
 }
