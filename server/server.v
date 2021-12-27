@@ -32,7 +32,7 @@ mut:
 
 struct MBusSrv {
 mut:
-	debug    int        // debug level
+	debugval int        // debug level
 	raddr    string     // redis address
 	myid     int         // local twin id
 	subaddr  string   // substrate (graphql) url
@@ -61,6 +61,12 @@ fn (msg Message) validate() ? {
 
 	if msg.retqueue == "" {
 		return error("return queue not defined")
+	}
+}
+
+fn (ctx MBusSrv) debug(msg string) {
+	if ctx.debugval > 0 {
+		println(msg)
 	}
 }
 
@@ -124,9 +130,7 @@ fn (mut ctx MBusSrv) handle_from_reply(mut r redisclient.Redis, value string) ? 
 		return
 	}
 
-	if ctx.debug > 0 {
-		println(msg)
-	}
+	ctx.debug(msg.str())
 
 	msg.validate() or {
 		println("reply: could not validate input")
@@ -196,9 +200,7 @@ fn (mut ctx MBusSrv) handle_from_local_prepare_item(msg Message, mut r redisclie
 	update.twin_src = ctx.myid
 	update.twin_dst = [dst]
 
-	if ctx.debug > 0 {
-		println("[+] resolving twin: $dst")
-	}
+	ctx.debug("[+] resolving twin: $dst")
 
 	mut dest := ctx.resolver(u32(dst)) or {
 		println("unknown twin")
@@ -226,9 +228,7 @@ fn (mut ctx MBusSrv) handle_from_local_prepare_item(msg Message, mut r redisclie
 	update.id = "${dst}.${id}"
 	update.retqueue = "msgbus.system.reply"
 
-	if ctx.debug > 0 {
-		println("[+] forwarding to $dest")
-	}
+	ctx.debug("[+] forwarding to $dest")
 
 	output := json.encode(update)
 	response := http.post("http://$dest:8051/zbus-remote", output) or {
@@ -237,10 +237,8 @@ fn (mut ctx MBusSrv) handle_from_local_prepare_item(msg Message, mut r redisclie
 		return
 	}
 
-	if ctx.debug > 0 {
-		println("[+] message sent to target msgbus")
-		println(response)
-	}
+	ctx.debug("[+] message sent to target msgbus")
+	ctx.debug(response.str())
 
 	/* LEGACY
 	mut rr := redisclient.connect(dest)?
@@ -255,9 +253,7 @@ fn (mut ctx MBusSrv) handle_from_local_prepare_item(msg Message, mut r redisclie
 }
 
 fn (mut ctx MBusSrv) handle_from_local_prepare(msg Message, mut r redisclient.Redis, value string) ? {
-	if ctx.debug > 0 {
-		println("original return queue: $msg.retqueue")
-	}
+	ctx.debug("original return queue: $msg.retqueue")
 
 	for dst in msg.twin_dst {
 		ctx.handle_from_local_prepare_item(msg, mut r, value, dst)?
@@ -280,9 +276,7 @@ fn (mut ctx MBusSrv) handle_from_local(mut r redisclient.Redis, value string) ? 
 		return
 	}
 
-	if ctx.debug > 0 {
-		println(msg)
-	}
+	ctx.debug(msg.str())
 
 	if msg.id == "" {
 		ctx.handle_from_local_prepare(msg, mut r, value)?
@@ -313,9 +307,7 @@ fn (mut ctx MBusSrv) handle_internal_hgetall(lines []resp2.RValue) []HSetEntry {
 }
 
 fn (mut ctx MBusSrv) handle_scrubbing(mut r redisclient.Redis) ? {
-	if ctx.debug > 0 {
-		println("[+] scrubbing")
-	}
+	ctx.debug("[+] scrubbing")
 
 	lines := r.hgetall("msgbus.system.backlog")?
 	mut entries := ctx.handle_internal_hgetall(lines)
@@ -330,9 +322,7 @@ fn (mut ctx MBusSrv) handle_scrubbing(mut r redisclient.Redis) ? {
 		}
 
 		if entry.value.epoch + entry.value.expiration < now {
-			if ctx.debug > 0 {
-				println("[+] expired: $entry.key")
-			}
+			ctx.debug("[+] expired: $entry.key")
 
 			entry.value.err = "request timeout (expiration reached, $entry.value.expiration seconds)"
 			output := json.encode(entry.value)
@@ -344,9 +334,7 @@ fn (mut ctx MBusSrv) handle_scrubbing(mut r redisclient.Redis) ? {
 }
 
 fn (mut ctx MBusSrv) handle_retry(mut r redisclient.Redis) ? {
-	if ctx.debug > 0 {
-		println("[+] checking retries")
-	}
+	ctx.debug("[+] checking retries")
 
 	lines := r.hgetall("msgbus.system.retry")?
 	mut entries := ctx.handle_internal_hgetall(lines)
@@ -389,7 +377,7 @@ pub fn run_server(myid int, redis_addres string, substrate string, debug int) ? 
 	mut srv := MBusSrv{
 		myid: myid,
 		raddr: redis_addres,
-		debug: debug,
+		debugval: debug,
 		subaddr: substrate,
 		grid: grid,
 	}
@@ -412,9 +400,7 @@ pub fn run_server(myid int, redis_addres string, substrate string, debug int) ? 
 	println("[+] server: waiting requests")
 
 	for {
-		if srv.debug > 0 {
-			println("[+] cycle waiting")
-		}
+		srv.debug("[+] cycle waiting")
 
 		m := r.blpop(["msgbus.system.local", "msgbus.system.remote", "msgbus.system.reply"], "1")?
 
@@ -442,7 +428,7 @@ pub fn run_server(myid int, redis_addres string, substrate string, debug int) ? 
 
 ['/zbus-remote'; post]
 pub fn (mut app App) zbus_web_remote() vweb.Result {
-	if app.config.debug > 0 {
+	if app.config.debugval > 0 {
 		println("[+] request from external agent")
 		println(app.req.data)
 	}
@@ -465,7 +451,7 @@ pub fn (mut app App) zbus_web_remote() vweb.Result {
 
 ['/zbus-reply'; post]
 pub fn (mut app App) zbus_web_reply() vweb.Result {
-	if app.config.debug > 0 {
+	if app.config.debugval > 0 {
 		println("[+] reply from external agent")
 		println(app.req.data)
 	}
