@@ -12,6 +12,7 @@ More options are available:
 ```
   --redis [redis-endpoint]
   --substrate [substrate-http]
+  --network [dev or test or main]
 ```
 
 - The `twin-id` is mendatory and will be used to identify messagebus identifier
