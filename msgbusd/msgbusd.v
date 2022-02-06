@@ -36,22 +36,22 @@ fn main() {
 		debug = 1
 	}
 
-	if cmd_network != '' {
-		match cmd_network {
-			'dev' {
-				cmd_sub = 'https://graphql.dev.grid.tf/graphql'
-			}
-			'test' {
-				cmd_sub = 'https://graphql.test.grid.tf/graphql'
-			}
-			'main' {
-				cmd_sub = 'https://graphql.grid.tf/graphql'
-			}
-			else {
-				eprintln('Unknown network, please choose from [dev, test, main]')
-			}
-		}
-	}
+	// if cmd_network != '' {
+	// 	match cmd_network {
+	// 		'dev' {
+	// 			cmd_sub = 'https://graphql.dev.grid.tf/graphql'
+	// 		}
+	// 		'test' {
+	// 			cmd_sub = 'https://graphql.test.grid.tf/graphql'
+	// 		}
+	// 		'main' {
+	// 			cmd_sub = 'https://graphql.grid.tf/graphql'
+	// 		}
+	// 		else {
+	// 			eprintln('Unknown network, please choose from [dev, test, main]')
+	// 		}
+	// 	}
+	// }
 
 	if cmd_sub.starts_with('ws') {
 		eprintln('Cannot use websocket substrate, https graphql required')
@@ -59,5 +59,5 @@ fn main() {
 		exit(1)
 	}
 
-	server.run_server(myid, cmd_redis, cmd_sub, debug) or { panic("Can't run msgbus server: $err") }
+	server.run_server(myid, cmd_redis, cmd_network, debug) or { panic("Can't run msgbus server: $err") }
 }
