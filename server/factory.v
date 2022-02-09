@@ -1,12 +1,14 @@
 module server
 
 import threefoldtech.vgrid.explorer
+import despiegk.crystallib.redisclient
 
 struct MBusSrv {
 mut:
 	debugval int        // debug level
 	myid     int        // local twin id
-	explorer     &explorer.ExplorerConnection
+	explorer    		&explorer.ExplorerConnection
+	redis				&redisclient.Redis
 }
 
 fn (ctx MBusSrv) debug(msg string) {
@@ -23,7 +25,9 @@ fn (mut ctx MBusSrv) resolver(twinid u32) ? string {
 
 
 //tfgridnet is test,dev or main
-pub fn run_server(myid int, redis_addres string, tfgridnet string, debug int) ? {
+pub fn run_server(myid int, tfgridnet string, debug int) ? {
+
+	mut redis := redisclient.get_local()?
 
 	tfgridnet2 := match tfgridnet {
 		'main'{ explorer.TFGridNet.main }
@@ -36,9 +40,9 @@ pub fn run_server(myid int, redis_addres string, tfgridnet string, debug int) ? 
 
 	mut srv_config := MBusSrv{
 		myid: myid,
-		raddr: redis_addres,
 		debugval: debug,
 		explorer: explorer,
+		redis: redis
 	}
 
 	//start 2 threads to test
