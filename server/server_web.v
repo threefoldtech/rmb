@@ -3,11 +3,21 @@ module server
 import json
 import vweb
 // import net.http
-import despiegk.crystallib.redisclient
+// import despiegk.crystallib.redisclient
+
+
+struct App {
+	vweb.Context
+mut:
+	config MBusSrv
+}
 
 
 
-fn runweb(config MBusSrv) {
+fn runweb(myid int, tfgridnet string, debug int)? {
+
+	mut config := srvconfig_get(myid,tfgridnet,debug)?
+
 	app := App{
 		config: config,
 	}
@@ -15,8 +25,12 @@ fn runweb(config MBusSrv) {
 	vweb.run(app, 8051)
 }
 
+
 ['/zbus-remote'; post]
 pub fn (mut app App) zbus_web_remote() vweb.Result {
+
+	mut redis := app.config.redis
+
 	if app.config.debugval > 0 {
 		println("[+] request from external agent")
 		println(app.req.data)
@@ -26,13 +40,9 @@ pub fn (mut app App) zbus_web_remote() vweb.Result {
 		return app.json('{"status": "error", "error": "could not parse message request"}')
 	}
 
-	// FIXME: could not create redis single time via init_server for some reason
-	lock app.config {
-		mut redis := redisclient.connect(app.config.raddr) or { panic(err) }
-
-		// forward request to local redis
-		redis.lpush("msgbus.system.remote", app.req.data) or { panic(err) }
-		redis.socket.close() or { panic(err) }
+	// forward request to local redis
+	redis.lpush("msgbus.system.remote", app.req.data) or {
+		return app.json('{"status": "error", "error": "could notsend message to remote"}')
 	}
 
 	return app.json('{"status": "accepted"}')
@@ -40,6 +50,9 @@ pub fn (mut app App) zbus_web_remote() vweb.Result {
 
 ['/zbus-reply'; post]
 pub fn (mut app App) zbus_web_reply() vweb.Result {
+	
+	mut redis := app.config.redis
+
 	if app.config.debugval > 0 {
 		println("[+] reply from external agent")
 		println(app.req.data)
@@ -49,13 +62,10 @@ pub fn (mut app App) zbus_web_reply() vweb.Result {
 		return app.json('{"status": "error", "error": "could not parse message request"}')
 	}
 
-	lock app.config {
-		// FIXME: could not create redis single time via init_server for some reason
-		mut redis := redisclient.connect(app.config.raddr) or { panic(err) }
-
-		// forward request to local redis
-		redis.lpush("msgbus.system.reply", app.req.data) or { panic(err) }
-		redis.socket.close() or { panic(err) }
+	
+	// forward request to local redis
+	redis.lpush("msgbus.system.reply", app.req.data) or {
+		return app.json('{"status": "error", "error": "could notsend message to reply"}')
 	}
 
 	return app.json('{"status": "accepted"}')

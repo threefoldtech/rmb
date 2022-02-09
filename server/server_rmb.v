@@ -1,26 +1,23 @@
 module server
 
-import vweb
+// import vweb
 import despiegk.crystallib.resp2
-
-import threefoldtech.vgrid.explorer
-
+// import threefoldtech.vgrid.explorer
 
 
-fn run_rmb(srv MBusSrv) {
+//is the main loop getting info from the redis and making sure it gets processed
+fn run_rmb(myid int, tfgridnet string, debug int)? {
+
+	mut srv := srvconfig_get(myid,tfgridnet,debug)?
 
 	println('[+] initializing agent server')
 
 	println("[+] twin id: $srv.myid")
-	println("[+] connecting to redis: $srv.raddr")
-	mut r := redisclient.connect(srv.raddr)?
-	r.ping() or {
-		println("[-] could not connect to redis server")
-		println(err)
-		exit(1)
-	}
 
-	println("[+] tfgrid net: $tfgridnet2")
+	mut r := srv.redis
+	r.ping() or {
+		return error("[-] could not connect to redis server.'n$err")
+	}
 
 	println("[+] server: waiting requests")
 

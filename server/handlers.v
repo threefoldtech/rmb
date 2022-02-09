@@ -292,3 +292,12 @@ fn (mut ctx MBusSrv) handle_retry(mut r redisclient.Redis) ? {
 		}
 	}
 }
+
+
+
+fn (ctx MBusSrv) debug(msg string) {
+	if ctx.debugval > 0 {
+		println(msg)
+	}
+}
+

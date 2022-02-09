@@ -1,18 +1,17 @@
-module server
+module grid_db_redis
 
 import threefoldtech.vgrid.explorer
 import despiegk.crystallib.redisclient
 
-struct MBusSrv {
+struct TFGRIDDB {
 mut:
-	debugval int        // debug level
-	myid     int        // local twin id
 	explorer    		&explorer.ExplorerConnection
 	redis				&redisclient.Redis
+	tfgridnet			string
 }
 
 
-fn srvconfig_get(myid int, tfgridnet string, debug int) ?&MBusSrv{
+fn new( tfgridnet string) ?&TFGRIDDB{
 
 	mut redis := redisclient.get_local()?
 
@@ -25,16 +24,15 @@ fn srvconfig_get(myid int, tfgridnet string, debug int) ?&MBusSrv{
 
 	mut explorer := explorer.get(tfgridnet2)
 
-	mut srv_config := MBusSrv{
-		myid: myid,
-		debugval: debug,
-		explorer: explorer,
+	mut srv_config := TFGRIDDB{
+		explorer: explorer
 		redis: redis
+		tfgridnet: tfgridnet
 	}
 	return &srv_config
 }
 
-fn (mut ctx MBusSrv) resolver(twinid u32) ? string {
+fn (mut ctx TFGRIDDB) resolver(twinid u32) ? string {
 	twin := ctx.explorer.twin_by_id(twinid)?
 	return twin.ip
 }
