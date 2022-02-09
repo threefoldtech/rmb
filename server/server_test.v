@@ -3,7 +3,6 @@ import os
 
 fn test_server() {
 	mut myid := 1000
-	mut redis_addr := "127.0.0.1:6379"
 
 	if os.args.len > 1 {
 		println("[+] twin id is user defined")
