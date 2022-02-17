@@ -1,5 +1,6 @@
 module server
 
+import regex
 
 pub struct Message {
 pub mut:
@@ -14,6 +15,7 @@ pub mut:
 	retqueue string [json: ret]   // return queue name where to send reply
 	schema string [json: shm]     // schema to define payload, later could enforce payload
 	epoch i64 [json: now]         // unix timestamp when request were created
+	proxy bool [json: pxy]
 	err string [json: err]        // optional error message if any
 }
 
@@ -21,6 +23,12 @@ pub struct HSetEntry {
 	key string
 mut:
 	value Message
+}
+
+fn is_valid_uuid(uuid string) ?bool {
+	query := r"^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-4[a-fA-F0-9]{3}-[8|9|aA|bB][a-fA-F0-9]{3}-[a-fA-F0-9]{12}$"
+	mut re := regex.regex_opt(query) ?
+	return re.matches_string(uuid)
 }
 
 fn (msg Message) validate() ? {
@@ -36,7 +44,9 @@ fn (msg Message) validate() ? {
 		return error("missing twin destination")
 	}
 
-	if msg.retqueue == "" {
-		return error("return queue not defined")
+	check_ret := is_valid_uuid(msg.retqueue) ?
+
+	if msg.retqueue == "" || !check_ret {
+		return error("return queue not valid")
 	}
 }

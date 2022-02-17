@@ -7,14 +7,14 @@ struct MBusSrv {
 mut:
 	debugval int        // debug level
 	myid     int        // local twin id
-	explorer    		&explorer.ExplorerConnection
-	redis				&redisclient.Redis
+	explorer &explorer.ExplorerConnection
+	redis    &redisclient.Redis
 }
 
 
 fn srvconfig_get(myid int, tfgridnet string, debug int) ?&MBusSrv{
 
-	mut redis := redisclient.get_local()?
+	mut redis := redisclient.get_local()
 
 	tfgridnet2 := match tfgridnet {
 		'main'{ explorer.TFGridNet.main }

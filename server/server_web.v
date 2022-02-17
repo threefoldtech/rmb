@@ -2,8 +2,8 @@ module server
 
 import json
 import vweb
+import rand
 // import net.http
-// import despiegk.crystallib.redisclient
 
 
 struct App {
@@ -21,7 +21,6 @@ fn runweb(myid int, tfgridnet string, debug int)? {
 	app := App{
 		config: config,
 	}
-
 	vweb.run(app, 8051)
 }
 
@@ -71,3 +70,37 @@ pub fn (mut app App) zbus_web_reply() vweb.Result {
 	return app.json('{"status": "accepted"}')
 }
 
+
+['/zbus-cmd'; post]
+pub fn (mut app App) zbus_http_cmd() vweb.Result {
+	// FIXME: app.config passed with wrong values. (default values, or nil address)
+	if app.config.debugval > 0 {
+		println('[+] request from external agent through zbus-cmd endpoint')
+		println(app.req.data)
+	}
+
+	mut msg := json.decode(Message, app.req.data) or {
+		return app.json('{"status": "error", "error": "could not parse message request"}')
+	}
+	msg.proxy = true
+	msg.retqueue = rand.uuid_v4()
+	encoded_msg := json.encode_pretty(msg)
+	mut redis := app.config.redis
+
+	// forward request to local redis
+	redis.lpush('msgbus.system.remote', encoded_msg) or { panic(err) }
+
+	return app.json('{"retqueue": "$msg.retqueue"}')
+}
+
+// TODO: Complete zbus-result endpoint
+// ['/zbus-result'; post]
+// pub fn (mut app App) zbus_http_result() vweb.Result {
+// 	m := json.decode(MessageIdentifer, app.req.data) or { panic ("Failed to parse json with error: $err") }
+// 	is_valid_retqueue := is_valid_uuid(m.retqueue) or {panic ("Failed to check valid uuid with error: $err")}
+// 	if !is_valid_retqueue {
+// 		panic("[-] Invalid Retqueue, it should be a valid UUID")
+// 	}
+	
+// 	return app.json("{success: true}") // FIXME: FOR DEBUG
+// }
