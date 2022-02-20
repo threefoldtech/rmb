@@ -9,17 +9,14 @@ import rand
 struct App {
 	vweb.Context
 mut:
-	config MBusSrv
+	config MBusSrv [vweb_global]
 }
 
 
 
-fn runweb(myid int, tfgridnet string, debug int)? {
-
-	mut config := srvconfig_get(myid,tfgridnet,debug)?
-
+fn (mut srv MBusSrv) run_web()? {
 	app := App{
-		config: config,
+		config: srv,
 	}
 	vweb.run(app, 8051)
 }
@@ -73,7 +70,6 @@ pub fn (mut app App) zbus_web_reply() vweb.Result {
 
 ['/zbus-cmd'; post]
 pub fn (mut app App) zbus_http_cmd() vweb.Result {
-	// FIXME: app.config passed with wrong values. (default values, or nil address)
 	if app.config.debugval > 0 {
 		println('[+] request from external agent through zbus-cmd endpoint')
 		println(app.req.data)

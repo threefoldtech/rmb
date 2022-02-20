@@ -42,10 +42,6 @@ fn (mut ctx MBusSrv) resolver(twinid u32) ? string {
 
 //tfgridnet is test,dev or main
 pub fn run_server(myid int, tfgridnet string, debug int) ? {
-
-	//start 2 threads to test
-	go runweb(myid , tfgridnet , debug )
-	go run_rmb(myid , tfgridnet , debug )
-
-
+	mut srv := srvconfig_get(myid, tfgridnet, debug) ?
+	srv.run_rmb() ?
 }

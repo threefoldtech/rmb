@@ -33,7 +33,4 @@ fn main() {
 
 	server.run_server(myid, cmd_network, debug) or { panic("Can't run msgbus server: $err") }
 
-	for {
-		time.sleep(1000)
-	}
 }

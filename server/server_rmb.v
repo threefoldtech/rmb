@@ -1,16 +1,12 @@
 module server
 
-// import vweb
 import despiegk.crystallib.resp2
-// import threefoldtech.vgrid.explorer
 
 
 //is the main loop getting info from the redis and making sure it gets processed
-fn run_rmb(myid int, tfgridnet string, debug int)? {
-
-	mut srv := srvconfig_get(myid,tfgridnet,debug)?
-
+fn (mut srv MBusSrv) run_rmb()? {
 	println('[+] initializing agent server')
+	go srv.run_web()
 
 	println("[+] twin id: $srv.myid")
 

@@ -46,7 +46,7 @@ fn (msg Message) validate() ? {
 
 	check_ret := is_valid_uuid(msg.retqueue) ?
 
-	if msg.retqueue == "" || !check_ret {
+	if !check_ret {
 		return error("return queue not valid")
 	}
 }
