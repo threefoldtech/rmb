@@ -19,6 +19,11 @@ pub mut:
 	err string [json: err]        // optional error message if any
 }
 
+pub struct MessageIdentifier {
+mut:
+	retqueue string
+}
+
 pub struct HSetEntry {
 	key string
 mut:
