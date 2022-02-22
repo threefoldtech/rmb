@@ -3,6 +3,7 @@ module server
 import json
 import vweb
 import rand
+import time
 import despiegk.crystallib.resp2
 import encoding.base64
 
@@ -32,8 +33,12 @@ pub fn (mut app App) zbus_web_remote() vweb.Result {
 		println(app.req.data)
 	}
 
-	_ := json.decode(Message, app.req.data) or {
-		return app.json('{"status": "error", "message": "could not parse message request"}')
+	msg := json.decode(Message, app.req.data) or {
+		return app.json('{"status": "error", "message": "could not parse message request, $err"}')
+	}
+
+	msg.validate_epoch() or {
+		return app.json('{"status": "error", "message: $err"}')
 	}
 
 	// forward request to local redis
@@ -57,8 +62,12 @@ pub fn (mut app App) zbus_web_reply() vweb.Result {
 		println(app.req.data)
 	}
 
-	_ := json.decode(Message, app.req.data) or {
+	msg := json.decode(Message, app.req.data) or {
 		return app.json('{"status": "error", "message": "could not parse message request"}')
+	}
+
+		msg.validate_epoch() or {
+		return app.json('{"status": "error", "message: $err"}')
 	}
 
 	// forward request to local redis
@@ -84,6 +93,11 @@ pub fn (mut app App) zbus_http_cmd() vweb.Result {
 	mut msg := json.decode(Message, app.req.data) or {
 		return app.json('{"status": "error", "message": "could not parse message request"}')
 	}
+
+	msg.validate_epoch() or {
+		return app.json('{"status": "error", "message: $err"}')
+	}
+
 	msg.proxy = true
 	msg.retqueue = rand.uuid_v4()
 	encoded_msg := json.encode_pretty(msg)
@@ -126,6 +140,7 @@ pub fn (mut app App) zbus_http_result() vweb.Result {
 			eprintln(err)
 			Message{}
 		}
+		m.epoch = time.now().unix_time()
 		m.data = base64.decode_str(m.data)
 		responses << m
 	}

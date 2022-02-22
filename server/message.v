@@ -1,6 +1,7 @@
 module server
 
 import regex
+import time
 
 pub struct Message {
 pub mut:
@@ -34,6 +35,13 @@ fn is_valid_uuid(uuid string) ?bool {
 	query := r'^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-4[a-fA-F0-9]{3}-[8|9|aA|bB][a-fA-F0-9]{3}-[a-fA-F0-9]{12}$'
 	mut re := regex.regex_opt(query) ?
 	return re.matches_string(uuid)
+}
+
+fn (msg Message) validate_epoch() ? {
+	diff := time.now().unix_time() - msg.epoch
+	if diff > 60 {
+		return error("message is too old, sent since $diff, sent time: $msg.epoch, now: ${time.now().unix_time()}")
+	}
 }
 
 fn (msg Message) validate() ? {

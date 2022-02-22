@@ -3,7 +3,6 @@ module main
 import threefoldtech.rmb.server
 import os.cmdline
 import os
-import time
 
 fn main() {
 	cmd_twin := cmdline.option(os.args, '--twin', '')
