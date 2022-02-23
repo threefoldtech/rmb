@@ -1,222 +1,201 @@
 module server
 
-import despiegk.crystallib.redisclient
 import despiegk.crystallib.resp2
 import json
 import time
 import net.http
 
-fn (mut ctx MBusSrv) handle_from_reply_forward(msg Message, mut r redisclient.Redis, value string) ? {
+fn (mut ctx MBusSrv) handle_from_reply_forward(mut msg Message) ? {
 	// reply have only one destination (source)
 	dst := msg.twin_dst[0]
 
-	println('resolving twin: $dst')
+	println('[+] resolving twin: $dst')
 	mut dest := ctx.resolver(u32(dst)) or {
-		println('unknown twin, drop')
-		return
+		return error("couldn't resolve twin ip with error: $err")
 	}
-
-	/*
-	dest := twins[dst]
-
-	if dest == "" {
-		println("unknown twin, drop")
-		return
-	}
-	*/
 
 	println('[+] forwarding reply to $dest')
 
+	msg.epoch = time.now().unix_time()
 	// forward to reply agent
-	response := http.post('http://$dest:8051/zbus-reply', value) or {
-		println(err)
-		http.Response{}
+	response := http.post('http://$dest:8051/zbus-reply', json.encode(msg)) or {
+		return error('failed to send post request to $dest with error: $err')
 	}
 
+	if response.status() != http.Status.ok {
+		return error('failed to send remote: $response.status_code ($response.text)')
+	}
 	println(response)
 }
 
-fn (mut ctx MBusSrv) handle_from_reply_for_me(msg Message, mut r redisclient.Redis, value string) ? {
+fn (mut ctx MBusSrv) handle_from_reply_for_me(mut msg Message) ? {
 	println('[+] message reply for me, fetching backlog')
 
-	retval := r.hget('msgbus.system.backlog', msg.id) ?
+	retval := ctx.redis.hget('msgbus.system.backlog', msg.id) or {
+		return error('error fetching message from backend with error: $err')
+	}
+
 	original := json.decode(Message, retval) or {
-		println('original decode failed')
-		return
+		return error('original decode failed with error: $err')
 	}
-
-	mut update := json.decode(Message, value) or {
-		println('update decode failed')
-		return
-	}
-
 	// restore return queue name for the caller
-	update.retqueue = original.retqueue
+	msg.retqueue = original.retqueue
 
 	// forward reply to original sender
-	r.lpush(update.retqueue, json.encode(update)) ?
+	ctx.redis.lpush(msg.retqueue, json.encode(msg)) or {
+		return error('failed to push message to redis with error: $err')
+	}
+
+	// Make key expire after 30 mins
+	expire_time_in_sec := 30 * 60
+	ctx.redis.expire(msg.retqueue, expire_time_in_sec) or {
+		return error('failed to set expire time to $msg.retqueue with error: $err')
+	}
 
 	// remove from backlog
-	r.hdel('msgbus.system.backlog', msg.id) ?
+	ctx.redis.hdel('msgbus.system.backlog', msg.id) ?
 }
 
-fn (mut ctx MBusSrv) handle_from_reply(mut r redisclient.Redis, value string) ? {
-	msg := json.decode(Message, value) or {
-		println('decode failed')
-		return
+fn (mut ctx MBusSrv) handle_from_reply_for_proxy(mut msg Message) ? {
+	println("[+] message reply for proxy")
+
+	// forward reply to original sender
+	ctx.redis.lpush(msg.retqueue, json.encode(msg)) or {
+		return error('failed to push message to redis with error: $err')
 	}
 
-	ctx.debug(msg.str())
-
-	msg.validate() or {
-		println('reply: could not validate input')
-		println(err)
-		return
+	// Make key expire after 30 mins
+	expire_time_in_sec := 30 * 60
+	ctx.redis.expire(msg.retqueue, expire_time_in_sec) or {
+		return error('failed to set expire time to $msg.retqueue with error: $err')
 	}
+}
 
-	if msg.twin_dst[0] == ctx.myid {
-		ctx.handle_from_reply_for_me(msg, mut r, value) ?
+fn (mut ctx MBusSrv) handle_from_reply(mut msg Message) ? {
+	// TODO: Validate msg once when receving it
+	msg.validate() or { return error('reply: validation failed with error: $err') }
+
+	if msg.proxy {
+		println('Handle from Proxy will implemented soon!')
+		ctx.handle_from_reply_for_proxy(mut msg) or {
+			return error('failed to handle reply proxy with error: $err')
+		}
+	} else if msg.twin_dst[0] == ctx.myid {
+		ctx.handle_from_reply_for_me(mut msg) or {
+			return error('failed to handle reply for me with error: $err')
+		}
 	} else if msg.twin_src == ctx.myid {
-		ctx.handle_from_reply_forward(msg, mut r, value) ?
+		ctx.handle_from_reply_forward(mut msg) or {
+			return error('failed to handle reply forward with error: $err')
+		}
 	}
 }
 
-fn (mut ctx MBusSrv) handle_from_remote(mut r redisclient.Redis, value string) ? {
-	msg := json.decode(Message, value) or {
-		println('decode failed')
-		return
-	}
-
-	// println(msg)
-
-	msg.validate() or {
-		println('remote: could not validate input')
-		println(err)
-		return
-	}
+fn (mut ctx MBusSrv) handle_from_remote(mut msg Message) ? {
+	// TODO: Validate msg once when receving it
+	msg.validate() or { return error('remote: validation failed with error: $err') }
 
 	println('[+] forwarding to local service: msgbus.' + msg.command)
 
 	// forward to local service
-	r.lpush('msgbus.' + msg.command, value) ?
+	ctx.redis.lpush('msgbus.' + msg.command, json.encode(msg)) or {
+		return error('failed to push ($msg.command) with error: $err')
+	}
 }
 
-fn (mut ctx MBusSrv) request_needs_retry(msg Message, mut update Message, mut r redisclient.Redis) ? {
+fn (mut ctx MBusSrv) msg_needs_retry(mut msg Message) ? {
 	println('[-] could not send message to remote msgbus')
 
-	// restore 'update' to original state
-	update.retqueue = msg.retqueue
-
-	if update.retry == 0 {
-		println('[-] no more retry, replying with error')
-		update.err = 'could not send request and all retries done'
-		output := json.encode(update)
-		r.lpush(update.retqueue, output) ?
-		return
+	if msg.retry <= 0 {
+		msg.err = 'could not send request and all retries done'
+		output := json.encode(msg)
+		ctx.redis.lpush(msg.retqueue, output) or {
+			return error("failed to respond to the caller with the proper error, due to $err")
+		}
+		return error('no more retry, replying with error')
 	}
 
-	println('[-] retry set to $update.retry, adding to retry list')
+	println('[-] retry set to $msg.retry, adding to retry list')
 
 	// remove one retry
-	update.retry -= 1
-	update.epoch = time.now().unix_time()
+	msg.retry -= 1
+	msg.epoch = time.now().unix_time()
 
-	value := json.encode(update)
-	r.hset('msgbus.system.retry', update.id, value) ?
+	value := json.encode(msg)
+	ctx.redis.hset('msgbus.system.retry', msg.id, value) or {
+		return error("faield to push message in reply queue with error: $err")
+	}
 }
 
-fn (mut ctx MBusSrv) handle_from_local_prepare_item(msg Message, mut r redisclient.Redis, value string, dst int) ? {
-	mut update := json.decode(Message, value) or {
-		println('decode failed')
-		return
-	}
-
+fn (mut ctx MBusSrv) handle_from_local_item(mut msg Message, dst int) ? {
+	msg.epoch = time.now().unix_time()
+	mut update := msg
 	update.twin_src = ctx.myid
 	update.twin_dst = [dst]
 
 	ctx.debug('[+] resolving twin: $dst')
 
+	mut error_msg := ''
+	defer {
+		if error_msg != '' {
+			ctx.msg_needs_retry(mut msg) or {
+				eprintln('failed while processing message retry with error: $err')
+				eprintln('original error: $error_msg')
+			}
+		}
+	}
 	mut dest := ctx.resolver(u32(dst)) or {
-		println('unknown twin')
-		update.err = 'unknown twin destination'
-		output := json.encode(update)
-		r.lpush(update.retqueue, output) ?
-		return
+		error_msg = 'failed to resolve twin ($dst) destination'
+		return error(error_msg)
+		/*
+		* What is the need to push the msg if failed to resolve destination ?
+		* output := json.encode(update)
+		* ctx.redis.lpush(update.retqueue, output) ?
+		* return
+		*/
 	}
 
-	/*
-	dest := twins[dst]
-
-	if dest == "" {
-		println("unknown twin")
-		update.err = "unknown twin destination"
-		output := json.encode(update)
-		r.lpush(update.retqueue, output)?
-		continue
+	id := ctx.redis.incr('msgbus.counter.$dst') or {
+		error_msg = 'failed to increment msgbus.counter.$dst with error: $err'
+		return error(error_msg)
 	}
-	*/
-
-	id := r.incr('msgbus.counter.$dst') ?
 
 	update.id = '${dst}.$id'
 	update.retqueue = 'msgbus.system.reply'
+	update.epoch = time.now().unix_time()
 
 	ctx.debug('[+] forwarding to $dest')
 
 	output := json.encode(update)
 	response := http.post('http://$dest:8051/zbus-remote', output) or {
-		eprintln(err)
-		ctx.request_needs_retry(msg, mut update, mut r) ?
-		return
+		error_msg = 'failed to send remote with error: $err'
+		return error(error_msg)
+	}
+
+	if response.status() != http.Status.ok {
+		error_msg = 'failed to send remote: $response.status_code ($response.text)'
+		return error(error_msg)
 	}
 
 	ctx.debug('[+] message sent to target msgbus')
 	ctx.debug(response.str())
 
-	/*
-	LEGACY
-	mut rr := redisclient.connect(dest)?
-	output := json.encode(update)
-	rr.lpush("msgbus.system.remote", output)?
-	rr.socket.close()?
-	*/
-
 	// keep message sent into backlog
 	// needed to find back return queue etc.
-	r.hset('msgbus.system.backlog', update.id, value) ?
+	ctx.redis.hset('msgbus.system.backlog', update.id, json.encode(msg)) or {
+		error_msg = 'failed to push message in backlog with error: $err'
+		return error(error_msg)
+	}
 }
 
-fn (mut ctx MBusSrv) handle_from_local_prepare(msg Message, mut r redisclient.Redis, value string) ? {
-	ctx.debug('original return queue: $msg.retqueue')
+fn (mut ctx MBusSrv) handle_from_local(mut msg Message) ? {
+	// TODO: Validate msg once when receving it
+	msg.validate() or { return error('local: could not validate input with error: $err') }
 
 	for dst in msg.twin_dst {
-		ctx.handle_from_local_prepare_item(msg, mut r, value, dst) ?
-	}
-}
-
-fn (mut ctx MBusSrv) handle_from_local_return(msg Message, mut r redisclient.Redis, value string) ? {
-	println('---')
-}
-
-fn (mut ctx MBusSrv) handle_from_local(mut r redisclient.Redis, value string) ? {
-	msg := json.decode(Message, value) or {
-		println('decode failed')
-		return
-	}
-
-	msg.validate() or {
-		println('local: could not validate input')
-		println(err)
-		return
-	}
-
-	ctx.debug(msg.str())
-
-	if msg.id == '' {
-		ctx.handle_from_local_prepare(msg, mut r, value) ?
-	} else {
-		// FIXME: not used, not needed ?
-		ctx.handle_from_local_return(msg, mut r, value) ?
+		ctx.handle_from_local_item(mut msg, dst) or {
+			eprintln('failed to handle message in handle_from_local_item with error: $err')
+		}
 	}
 }
 
@@ -240,10 +219,10 @@ fn (mut ctx MBusSrv) handle_internal_hgetall(lines []resp2.RValue) []HSetEntry {
 	return entries
 }
 
-fn (mut ctx MBusSrv) handle_scrubbing(mut r redisclient.Redis) ? {
+fn (mut ctx MBusSrv) handle_scrubbing() ? {
 	ctx.debug('[+] scrubbing')
 
-	lines := r.hgetall('msgbus.system.backlog') ?
+	lines := ctx.redis.hgetall('msgbus.system.backlog') ?
 	mut entries := ctx.handle_internal_hgetall(lines)
 
 	now := time.now().unix_time()
@@ -261,16 +240,16 @@ fn (mut ctx MBusSrv) handle_scrubbing(mut r redisclient.Redis) ? {
 			entry.value.err = 'request timeout (expiration reached, $entry.value.expiration seconds)'
 			output := json.encode(entry.value)
 
-			r.lpush(entry.value.retqueue, output) ?
-			r.hdel('msgbus.system.backlog', entry.key) ?
+			ctx.redis.lpush(entry.value.retqueue, output) ?
+			ctx.redis.hdel('msgbus.system.backlog', entry.key) ?
 		}
 	}
 }
 
-fn (mut ctx MBusSrv) handle_retry(mut r redisclient.Redis) ? {
+fn (mut ctx MBusSrv) handle_retry() ? {
 	ctx.debug('[+] checking retries')
 
-	lines := r.hgetall('msgbus.system.retry') ?
+	lines := ctx.redis.hgetall('msgbus.system.retry') ?
 	mut entries := ctx.handle_internal_hgetall(lines)
 
 	now := time.now().unix_time()
@@ -280,14 +259,12 @@ fn (mut ctx MBusSrv) handle_retry(mut r redisclient.Redis) ? {
 		if now > entry.value.epoch + 5 { // 5 sec debug
 			println('[+] retry needed: $entry.key')
 
-			value := json.encode(entry.value)
-
 			// remove from retry list
-			r.hdel('msgbus.system.retry', entry.key) ?
+			ctx.redis.hdel('msgbus.system.retry', entry.key) ?
 
 			// re-call sending function, which will succeed
 			// or put it back to retry
-			ctx.handle_from_local_prepare_item(entry.value, mut r, value, entry.value.twin_dst[0]) ?
+			ctx.handle_from_local_item(mut entry.value, entry.value.twin_dst[0]) ?
 		}
 	}
 }
