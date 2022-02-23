@@ -37,9 +37,7 @@ pub fn (mut app App) zbus_web_remote() vweb.Result {
 		return app.json('{"status": "error", "message": "could not parse message request, $err"}')
 	}
 
-	msg.validate_epoch() or {
-		return app.json('{"status": "error", "message: $err"}')
-	}
+	msg.validate_epoch() or { return app.json('{"status": "error", "message: $err"}') }
 
 	// forward request to local redis
 	redis.lpush('msgbus.system.remote', app.req.data) or {
@@ -66,9 +64,7 @@ pub fn (mut app App) zbus_web_reply() vweb.Result {
 		return app.json('{"status": "error", "message": "could not parse message request"}')
 	}
 
-		msg.validate_epoch() or {
-		return app.json('{"status": "error", "message: $err"}')
-	}
+	msg.validate_epoch() or { return app.json('{"status": "error", "message: $err"}') }
 
 	// forward request to local redis
 	redis.lpush('msgbus.system.reply', app.req.data) or {
@@ -94,9 +90,7 @@ pub fn (mut app App) zbus_http_cmd() vweb.Result {
 		return app.json('{"status": "error", "message": "could not parse message request"}')
 	}
 
-	msg.validate_epoch() or {
-		return app.json('{"status": "error", "message: $err"}')
-	}
+	msg.validate_epoch() or { return app.json('{"status": "error", "message: $err"}') }
 
 	msg.proxy = true
 	msg.retqueue = rand.uuid_v4()

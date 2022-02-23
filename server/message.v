@@ -40,7 +40,7 @@ fn is_valid_uuid(uuid string) ?bool {
 fn (msg Message) validate_epoch() ? {
 	diff := time.now().unix_time() - msg.epoch
 	if diff > 60 {
-		return error("message is too old, sent since $diff, sent time: $msg.epoch, now: ${time.now().unix_time()}")
+		return error('message is too old, sent since $diff, sent time: $msg.epoch, now: $time.now().unix_time()')
 	}
 }
 
