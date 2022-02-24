@@ -41,11 +41,16 @@ async function getTwinByIDHandler(message, payload) {
   return twin
 }
 
+async function ping(message, payload) {
+  console.log(payload)
+  return "pong"
+}
+
 const msgBus = new MessageBusServer(6379)
 msgBus.withHandler("wallet.stellar.balance.tft", walletStellarTftHandler)
 msgBus.withHandler("griddb.twins.create", createTwinHandler)
 msgBus.withHandler("griddb.twins.get", getTwinByIDHandler)
-
+msgBus.withHandler("zos.statistics.get", ping)
 msgBus.run()
 
 

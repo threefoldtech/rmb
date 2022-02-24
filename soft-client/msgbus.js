@@ -124,7 +124,7 @@ class MessageBusServer {
     message.dst = [source]
     message.now = Math.floor(new Date().getTime() / 1000)
 
-    this.client.lpush(message.ret, JSON.stringify(message), function (err, r) {
+    this.client.lpush('msgbus.system.reply', JSON.stringify(message), function (err, r) {
       console.log("[+] response sent to caller")
       console.log(err, r)
     })
