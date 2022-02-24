@@ -57,7 +57,7 @@ fn (mut ctx MBusSrv) handle_from_reply_for_me(mut msg Message) ? {
 }
 
 fn (mut ctx MBusSrv) handle_from_reply_for_proxy(mut msg Message) ? {
-	println("[+] message reply for proxy")
+	println('[+] message reply for proxy')
 
 	// forward reply to original sender
 	ctx.redis.lpush(msg.retqueue, json.encode(msg)) or {
@@ -76,7 +76,6 @@ fn (mut ctx MBusSrv) handle_from_reply(mut msg Message) ? {
 	msg.validate() or { return error('reply: validation failed with error: $err') }
 
 	if msg.proxy {
-		println('Handle from Proxy will implemented soon!')
 		ctx.handle_from_reply_for_proxy(mut msg) or {
 			return error('failed to handle reply proxy with error: $err')
 		}
@@ -110,7 +109,7 @@ fn (mut ctx MBusSrv) msg_needs_retry(mut msg Message) ? {
 		msg.err = 'could not send request and all retries done'
 		output := json.encode(msg)
 		ctx.redis.lpush(msg.retqueue, output) or {
-			return error("failed to respond to the caller with the proper error, due to $err")
+			return error('failed to respond to the caller with the proper error, due to $err')
 		}
 		return error('no more retry, replying with error')
 	}
@@ -123,7 +122,7 @@ fn (mut ctx MBusSrv) msg_needs_retry(mut msg Message) ? {
 
 	value := json.encode(msg)
 	ctx.redis.hset('msgbus.system.retry', msg.id, value) or {
-		return error("faield to push message in reply queue with error: $err")
+		return error('faield to push message in reply queue with error: $err')
 	}
 }
 
@@ -199,14 +198,17 @@ fn (mut ctx MBusSrv) handle_from_local(mut msg Message) ? {
 	}
 }
 
-fn (mut ctx MBusSrv) handle_internal_hgetall(lines []resp2.RValue) []HSetEntry {
+fn (mut ctx MBusSrv) hgetall_result(key string) ?[]HSetEntry {
+	lines := ctx.redis.hgetall(key) or {
+		return error('failed to read $key result with error: $err')
+	}
 	mut entries := []HSetEntry{}
 
 	// build usable list from redis response
 	for i := 0; i < lines.len; i += 2 {
 		value := resp2.get_redis_value(lines[i + 1])
 		message := json.decode(Message, value) or {
-			println('decode failed hgetall message')
+			eprintln('decode failed hgetall message')
 			continue
 		}
 
@@ -220,10 +222,9 @@ fn (mut ctx MBusSrv) handle_internal_hgetall(lines []resp2.RValue) []HSetEntry {
 }
 
 fn (mut ctx MBusSrv) handle_scrubbing() ? {
-	ctx.debug('[+] scrubbing')
+	// ctx.debug('[+] scrubbing')
 
-	lines := ctx.redis.hgetall('msgbus.system.backlog') ?
-	mut entries := ctx.handle_internal_hgetall(lines)
+	mut entries := ctx.hgetall_result('msgbus.system.backlog') or { return error('$err') }
 
 	now := time.now().unix_time()
 
@@ -240,31 +241,37 @@ fn (mut ctx MBusSrv) handle_scrubbing() ? {
 			entry.value.err = 'request timeout (expiration reached, $entry.value.expiration seconds)'
 			output := json.encode(entry.value)
 
-			ctx.redis.lpush(entry.value.retqueue, output) ?
-			ctx.redis.hdel('msgbus.system.backlog', entry.key) ?
+			ctx.redis.lpush(entry.value.retqueue, output) or {
+				eprintln('failed to push message with proper error due to $err')
+			}
+			ctx.redis.hdel('msgbus.system.backlog', entry.key) or {
+				eprintln('failed to delete $entry.key from backlog')
+			}
 		}
 	}
 }
 
 fn (mut ctx MBusSrv) handle_retry() ? {
-	ctx.debug('[+] checking retries')
+	// ctx.debug('[+] checking retries')
 
-	lines := ctx.redis.hgetall('msgbus.system.retry') ?
-	mut entries := ctx.handle_internal_hgetall(lines)
+	mut entries := ctx.hgetall_result('msgbus.system.retry') or { return error('$err') }
 
 	now := time.now().unix_time()
 
 	// iterate over each entries
 	for mut entry in entries {
-		if now > entry.value.epoch + 5 { // 5 sec debug
+		if now > entry.value.epoch + 5 {
 			println('[+] retry needed: $entry.key')
 
 			// remove from retry list
-			ctx.redis.hdel('msgbus.system.retry', entry.key) ?
+			ctx.redis.hdel('msgbus.system.retry', entry.key) or {
+				eprintln('error deleting $entry.key from retry queue with error: $err')
+			}
 
-			// re-call sending function, which will succeed
-			// or put it back to retry
-			ctx.handle_from_local_item(mut entry.value, entry.value.twin_dst[0]) ?
+			// re-call sending function, which will succeed or put it back to retry
+			ctx.handle_from_local_item(mut entry.value, entry.value.twin_dst[0]) or {
+				eprintln('error from handle_from_local_item for $entry.value.id, retry handled from there')
+			}
 		}
 	}
 }

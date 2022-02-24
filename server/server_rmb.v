@@ -16,14 +16,14 @@ fn (mut srv MBusSrv) run_rmb() ? {
 	println('[+] server: waiting requests')
 
 	for {
-		srv.debug('[+] cycle waiting')
+		// srv.debug('[+] cycle waiting')
 
 		m := r.blpop(['msgbus.system.local', 'msgbus.system.remote', 'msgbus.system.reply'],
 			'1') ?
 
 		if m.len == 0 {
-			srv.handle_scrubbing() ?
-			srv.handle_retry() ?
+			srv.handle_scrubbing() or { eprintln('error happen while handle scrubbing, $err') }
+			srv.handle_retry() or { eprintln('error happen while handle retry, $err') }
 			continue
 		}
 
@@ -33,15 +33,15 @@ fn (mut srv MBusSrv) run_rmb() ? {
 			return error('failed to decode message with error: $err')
 		}
 		if key == 'msgbus.system.reply' {
-			srv.handle_from_reply(mut msg) ?
+			srv.handle_from_reply(mut msg) or { eprintln('error from (handle_from_reply), $err') }
 		}
 
 		if key == 'msgbus.system.local' {
-			srv.handle_from_local(mut msg) ?
+			srv.handle_from_local(mut msg) or { eprintln('error from (handle_from_local), $err') }
 		}
 
 		if key == 'msgbus.system.remote' {
-			srv.handle_from_remote(mut msg) ?
+			srv.handle_from_remote(mut msg) or { eprintln('error from (handle_from_remote), $err') }
 		}
 	}
 }

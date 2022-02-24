@@ -12,7 +12,9 @@ mut:
 }
 
 fn srvconfig_get(myid int, tfgridnet string, debug int) ?&MBusSrv {
-	mut redis := redisclient.get_local()
+	mut redis := redisclient.get_local_new() or {
+		return error('failed to connect to redis locally with error: $err')
+	}
 
 	tfgridnet2 := match tfgridnet {
 		'main' { explorer.TFGridNet.main }
@@ -40,5 +42,5 @@ fn (mut ctx MBusSrv) resolver(twinid u32) ?string {
 // tfgridnet is test,dev or main
 pub fn run_server(myid int, tfgridnet string, debug int) ? {
 	mut srv := srvconfig_get(myid, tfgridnet, debug) ?
-	srv.run_rmb() ?
+	srv.run_rmb() or { return error('RMB failed with error: $err') }
 }
