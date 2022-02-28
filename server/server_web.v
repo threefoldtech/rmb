@@ -26,8 +26,6 @@ fn (mut srv MBusSrv) run_web() ? {
 */
 ['/zbus-remote'; post]
 pub fn (mut app App) zbus_web_remote() vweb.Result {
-	mut redis := app.config.redis
-
 	if app.config.debugval > 0 {
 		println('[+] request from external agent')
 		println(app.req.data)
@@ -40,7 +38,7 @@ pub fn (mut app App) zbus_web_remote() vweb.Result {
 	msg.validate_epoch() or { return app.json('{"status": "error", "message: $err"}') }
 
 	// forward request to local redis
-	redis.lpush('msgbus.system.remote', app.req.data) or {
+	app.config.redis.lpush('msgbus.system.remote', app.req.data) or {
 		return app.json('{"status": "error", "message": "could not send message to remote"}')
 	}
 
@@ -53,8 +51,6 @@ pub fn (mut app App) zbus_web_remote() vweb.Result {
 */
 ['/zbus-reply'; post]
 pub fn (mut app App) zbus_web_reply() vweb.Result {
-	mut redis := app.config.redis
-
 	if app.config.debugval > 0 {
 		println('[+] reply from external agent')
 		println(app.req.data)
@@ -67,7 +63,7 @@ pub fn (mut app App) zbus_web_reply() vweb.Result {
 	msg.validate_epoch() or { return app.json('{"status": "error", "message: $err"}') }
 
 	// forward request to local redis
-	redis.lpush('msgbus.system.reply', app.req.data) or {
+	app.config.redis.lpush('msgbus.system.reply', app.req.data) or {
 		return app.json('{"status": "error", "message": "could not send message to reply"}')
 	}
 
@@ -94,11 +90,12 @@ pub fn (mut app App) zbus_http_cmd() vweb.Result {
 
 	msg.proxy = true
 	msg.retqueue = rand.uuid_v4()
-	encoded_msg := json.encode_pretty(msg)
-	mut redis := app.config.redis
+	encoded_msg := json.encode(msg)
 
 	// forward request to local redis
-	redis.lpush('msgbus.system.remote', encoded_msg) or { panic(err) }
+	app.config.redis.lpush('msgbus.system.remote', encoded_msg) or {
+		panic('from zbus-cmd push to remote $err')
+	}
 
 	return app.json('{"retqueue": "$msg.retqueue"}')
 }
@@ -123,8 +120,8 @@ pub fn (mut app App) zbus_http_result() vweb.Result {
 	if !is_valid_retqueue {
 		return app.json('{"status": "error", "message": "Invalid Retqueue, it should be a valid UUID"}')
 	}
-	mut redis := app.config.redis
-	lr := redis.lrange(mid.retqueue, 0, -1) or {
+
+	lr := app.config.redis.lrange(mid.retqueue, 0, -1) or {
 		return app.json('{"status": "error", "message": "Error fetching from redis $err"}')
 	}
 	mut responses := []Message{}

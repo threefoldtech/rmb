@@ -57,9 +57,7 @@ fn (msg Message) validate() ? {
 		return error('missing twin destination')
 	}
 
-	check_ret := is_valid_uuid(msg.retqueue) ?
-
-	if !check_ret {
-		return error('return queue not valid')
+	if msg.retqueue == '' {
+		return error('return queue not defined')
 	}
 }
