@@ -131,18 +131,26 @@ fn (mut ctx MBusSrv) handle_from_local_item(mut msg Message, dst int) ? {
 	mut update := msg
 	update.twin_src = ctx.myid
 	update.twin_dst = [dst]
+	mut single_dst_message := msg
+	single_dst_message.twin_dst = [dst]
 
 	ctx.debug('[+] resolving twin: $dst')
 
 	mut error_msg := ''
 	defer {
 		if error_msg != '' {
-			ctx.msg_needs_retry(mut msg) or {
+			ctx.msg_needs_retry(mut single_dst_message) or {
 				eprintln('failed while processing message retry with error: $err')
 				eprintln('original error: $error_msg')
 			}
 		}
 	}
+	id := ctx.redis.incr('msgbus.counter.$dst') or {
+		error_msg = 'failed to increment msgbus.counter.$dst with error: $err'
+		return error(error_msg)
+	}
+	single_dst_message.id = '${dst}.$id'
+
 	mut dest := ctx.resolver(u32(dst)) or {
 		error_msg = 'failed to resolve twin ($dst) destination'
 		return error(error_msg)
@@ -152,11 +160,6 @@ fn (mut ctx MBusSrv) handle_from_local_item(mut msg Message, dst int) ? {
 		* ctx.redis.lpush(update.retqueue, output) ?
 		* return
 		*/
-	}
-
-	id := ctx.redis.incr('msgbus.counter.$dst') or {
-		error_msg = 'failed to increment msgbus.counter.$dst with error: $err'
-		return error(error_msg)
 	}
 
 	update.id = '${dst}.$id'
