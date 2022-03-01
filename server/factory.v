@@ -41,6 +41,8 @@ fn (mut ctx MBusSrv) resolver(twinid u32) ?string {
 
 // tfgridnet is test,dev or main
 pub fn run_server(myid int, tfgridnet string, debug int) ? {
-	mut srv := srvconfig_get(myid, tfgridnet, debug) ?
-	srv.run_rmb() or { return error('RMB failed with error: $err') }
+	mut srv_rmb := srvconfig_get(myid, tfgridnet, debug) ? // connection for rmb
+	mut srv_web := srvconfig_get(myid, tfgridnet, debug) ? // connection for web
+	go srv_web.run_web()
+	srv_rmb.run_rmb() or { return error('RMB failed with error: $err') }
 }

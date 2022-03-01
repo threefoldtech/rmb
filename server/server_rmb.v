@@ -5,9 +5,6 @@ import json
 
 // is the main loop getting info from the redis and making sure it gets processed
 fn (mut srv MBusSrv) run_rmb() ? {
-	println('[+] initializing agent server')
-	go srv.run_web()
-
 	println('[+] twin id: $srv.myid')
 
 	mut r := srv.redis
@@ -17,9 +14,11 @@ fn (mut srv MBusSrv) run_rmb() ? {
 
 	for {
 		// srv.debug('[+] cycle waiting')
-
 		m := r.blpop(['msgbus.system.local', 'msgbus.system.remote', 'msgbus.system.reply'],
-			'1') ?
+			'1') or {
+			eprintln('error happen with main blpop, $err')
+			[]resp2.RValue{}
+		}
 
 		if m.len == 0 {
 			srv.handle_scrubbing() or { eprintln('error happen while handle scrubbing, $err') }

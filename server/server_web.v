@@ -17,6 +17,7 @@ fn (mut srv MBusSrv) run_web() ? {
 	app := App{
 		config: srv
 	}
+	println('[+] initializing agent server')
 	vweb.run(app, 8051)
 }
 
