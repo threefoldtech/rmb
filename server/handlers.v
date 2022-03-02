@@ -102,11 +102,11 @@ fn (mut ctx MBusSrv) handle_from_remote(mut msg Message) ? {
 	}
 }
 
-fn (mut ctx MBusSrv) msg_needs_retry(mut msg Message) ? {
+fn (mut ctx MBusSrv) msg_needs_retry(mut msg Message, retry_reason string) ? {
 	println('[-] could not send message to remote msgbus')
 
 	if msg.retry <= 0 {
-		msg.err = 'could not send request and all retries done'
+		msg.err = 'could not send request and all retries done, last error: $retry_reason'
 		output := json.encode(msg)
 		ctx.redis.lpush(msg.retqueue, output) or {
 			return error('failed to respond to the caller with the proper error, due to $err')
@@ -139,9 +139,9 @@ fn (mut ctx MBusSrv) handle_from_local_item(mut msg Message, dst int) ? {
 	mut error_msg := ''
 	defer {
 		if error_msg != '' {
-			ctx.msg_needs_retry(mut single_dst_message) or {
-				eprintln('failed while processing message retry with error: $err')
-				eprintln('original error: $error_msg')
+			ctx.msg_needs_retry(mut single_dst_message, error_msg) or {
+				eprintln('[-] failed while processing message retry with error: $err')
+				eprintln('[-] original error: $error_msg')
 			}
 		}
 	}
@@ -196,7 +196,7 @@ fn (mut ctx MBusSrv) handle_from_local(mut msg Message) ? {
 
 	for dst in msg.twin_dst {
 		ctx.handle_from_local_item(mut msg, dst) or {
-			eprintln('failed to handle message in handle_from_local_item with error: $err')
+			eprintln('[-] failed to handle message in handle_from_local_item with error: $err')
 		}
 	}
 }
@@ -211,7 +211,7 @@ fn (mut ctx MBusSrv) hgetall_result(key string) ?[]HSetEntry {
 	for i := 0; i < lines.len; i += 2 {
 		value := resp2.get_redis_value(lines[i + 1])
 		message := json.decode(Message, value) or {
-			eprintln('decode failed hgetall message')
+			eprintln('[-] decode failed hgetall message')
 			continue
 		}
 
@@ -245,10 +245,10 @@ fn (mut ctx MBusSrv) handle_scrubbing() ? {
 			output := json.encode(entry.value)
 
 			ctx.redis.lpush(entry.value.retqueue, output) or {
-				eprintln('failed to push message with proper error due to $err')
+				eprintln('[-] failed to push message with proper error due to $err')
 			}
 			ctx.redis.hdel('msgbus.system.backlog', entry.key) or {
-				eprintln('failed to delete $entry.key from backlog')
+				eprintln('[-] failed to delete $entry.key from backlog')
 			}
 		}
 	}
@@ -268,12 +268,12 @@ fn (mut ctx MBusSrv) handle_retry() ? {
 
 			// remove from retry list
 			ctx.redis.hdel('msgbus.system.retry', entry.key) or {
-				eprintln('error deleting $entry.key from retry queue with error: $err')
+				eprintln('[-] error deleting $entry.key from retry queue with error: $err')
 			}
 
 			// re-call sending function, which will succeed or put it back to retry
 			ctx.handle_from_local_item(mut entry.value, entry.value.twin_dst[0]) or {
-				eprintln('error from handle_from_local_item for $entry.value.id, retry handled from there')
+				eprintln('[-] error from handle_from_local_item for $entry.value.id, retry handled from there')
 			}
 		}
 	}

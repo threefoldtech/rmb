@@ -53,6 +53,6 @@ pub fn run_server(myid int, tfgridnet string, debug int) ? {
 	go run_web(myid, tfgridnet, debug)
 
 	for i, th in server_threads {
-		th.wait() or { eprintln('thread #$i return with error: $err') }
+		th.wait() or { eprintln('[-] thread #$i return with error: $err') }
 	}
 }
