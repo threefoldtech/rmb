@@ -30,5 +30,10 @@ fn main() {
 		debug = 1
 	}
 
+	if cmd_network !in ['dev', 'test', 'main'] {
+		eprintln('Unknown network, please choose from [dev, test, main]')
+		return
+	}
+
 	server.run_server(myid, cmd_network, debug) or { panic("Can't run msgbus server: $err") }
 }
