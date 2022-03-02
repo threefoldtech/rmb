@@ -13,7 +13,8 @@ mut:
 	config MBusSrv [vweb_global]
 }
 
-fn (mut srv MBusSrv) run_web() ? {
+fn run_web(myid int, tfgridnet string, debug int) ? {
+	mut srv := srvconfig_get(myid, tfgridnet, debug) ?
 	app := App{
 		config: srv
 	}

@@ -12,7 +12,7 @@ mut:
 }
 
 fn srvconfig_get(myid int, tfgridnet string, debug int) ?&MBusSrv {
-	mut redis := redisclient.get_local_new() or {
+	mut redis := redisclient.get_unixsocket_new_default() or {
 		return error('failed to connect to redis locally with error: $err')
 	}
 
@@ -41,8 +41,18 @@ fn (mut ctx MBusSrv) resolver(twinid u32) ?string {
 
 // tfgridnet is test,dev or main
 pub fn run_server(myid int, tfgridnet string, debug int) ? {
-	mut srv_rmb := srvconfig_get(myid, tfgridnet, debug) ? // connection for rmb
-	mut srv_web := srvconfig_get(myid, tfgridnet, debug) ? // connection for web
-	go srv_web.run_web()
-	srv_rmb.run_rmb() or { return error('RMB failed with error: $err') }
+	println('[+] twin id: $myid')
+	mut server_threads := []thread ?{}
+	for _ in 0 .. 1000 {
+		server_threads << go run_rmb(myid, tfgridnet, debug)
+	}
+	println('[+] server: workers started and waiting requests')
+
+	go run_scrubbing(myid, tfgridnet, debug)
+	go run_retry(myid, tfgridnet, debug)
+	go run_web(myid, tfgridnet, debug)
+
+	for i, th in server_threads {
+		th.wait() or { eprintln('thread #$i return with error: $err') }
+	}
 }
