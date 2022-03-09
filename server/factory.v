@@ -23,7 +23,7 @@ fn srvconfig_get(myid int, tfgridnet string, debug int) ?&MBusSrv {
 		else { explorer.TFGridNet.test }
 	}
 
-	mut explorer := explorer.get(tfgridnet2)
+	mut explorer := explorer.new(tfgridnet2)
 
 	mut srv_config := MBusSrv{
 		myid: myid
