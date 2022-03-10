@@ -5,6 +5,8 @@ import json
 import time
 import net.http
 
+const reply_forward_retries = 3
+
 fn (mut ctx MBusSrv) handle_from_reply_forward(mut msg Message) ? {
 	// reply have only one destination (source)
 	dst := msg.twin_dst[0]
@@ -18,11 +20,20 @@ fn (mut ctx MBusSrv) handle_from_reply_forward(mut msg Message) ? {
 
 	msg.epoch = time.now().unix_time()
 	// forward to reply agent
+	/* ctx.redis.incr('msgbus.system.send_msg_count') or {
+		eprintln('send_msg_count error')
+	} */
 	response := http.post('http://$dest:8051/zbus-reply', json.encode(msg)) or {
+		/* ctx.redis.incr('msgbus.system.error_sending_msg_count') or {
+			eprintln('send_msg_count error')
+		} */
 		return error('failed to send post request to $dest with error: $err')
 	}
 
 	if response.status() != http.Status.ok {
+		/* ctx.redis.incr('msgbus.system.not_okay_code_msg_count') or {
+			eprintln('send_msg_count error')
+		} */
 		return error('failed to send remote: $response.status_code ($response.text)')
 	}
 	println(response)
@@ -84,8 +95,18 @@ fn (mut ctx MBusSrv) handle_from_reply(mut msg Message) ? {
 			return error('failed to handle reply for me with error: $err')
 		}
 	} else if msg.twin_src == ctx.myid {
-		ctx.handle_from_reply_forward(mut msg) or {
-			return error('failed to handle reply forward with error: $err')
+		// handling network/server issues when sending the replay over http by retrying
+		// this decrease the number of failing messages due to failed tcp conection from 9+ to 0 in our tests
+		mut reply_forward_err := ""
+		for i in 0..reply_forward_retries {
+			ctx.handle_from_reply_forward(mut msg) or {
+				reply_forward_err = '$err'
+				continue
+			}
+			break
+		}
+		if reply_forward_err != "" {
+			return error('failed to handle reply forward with error: $reply_forward_err')
 		}
 	}
 }
