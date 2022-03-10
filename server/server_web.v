@@ -34,13 +34,18 @@ pub fn (mut app App) zbus_web_remote() vweb.Result {
 	}
 
 	msg := json.decode(Message, app.req.data) or {
+		app.set_status(400, 'Bad Request')
 		return app.json('{"status": "error", "message": "could not parse message request, $err"}')
 	}
 
-	msg.validate_epoch() or { return app.json('{"status": "error", "message: $err"}') }
+	msg.validate_epoch() or { 
+		app.set_status(400, 'Bad Request')
+		return app.json('{"status": "error", "message: $err"}') 
+	}
 
 	// forward request to local redis
 	app.config.redis.lpush('msgbus.system.remote', app.req.data) or {
+		app.set_status(500, 'Internal Error')
 		return app.json('{"status": "error", "message": "could not send message to remote"}')
 	}
 
@@ -59,13 +64,18 @@ pub fn (mut app App) zbus_web_reply() vweb.Result {
 	}
 
 	msg := json.decode(Message, app.req.data) or {
+		app.set_status(400, 'Bad Request')
 		return app.json('{"status": "error", "message": "could not parse message request"}')
 	}
 
-	msg.validate_epoch() or { return app.json('{"status": "error", "message: $err"}') }
+	msg.validate_epoch() or {
+		app.set_status(400, 'Bad Request')
+		return app.json('{"status": "error", "message: $err"}') 
+	}
 
 	// forward request to local redis
 	app.config.redis.lpush('msgbus.system.reply', app.req.data) or {
+		app.set_status(500, 'Internal Error')
 		return app.json('{"status": "error", "message": "could not send message to reply"}')
 	}
 
@@ -85,10 +95,14 @@ pub fn (mut app App) zbus_http_cmd() vweb.Result {
 	}
 
 	mut msg := json.decode(Message, app.req.data) or {
+		app.set_status(400, 'Bad Request')
 		return app.json('{"status": "error", "message": "could not parse message request"}')
 	}
 
-	msg.validate_epoch() or { return app.json('{"status": "error", "message: $err"}') }
+	msg.validate_epoch() or {
+		app.set_status(400, 'Bad Request')
+		return app.json('{"status": "error", "message: $err"}')
+	}
 
 	msg.proxy = true
 	msg.retqueue = rand.uuid_v4()
@@ -96,7 +110,8 @@ pub fn (mut app App) zbus_http_cmd() vweb.Result {
 
 	// forward request to local redis
 	app.config.redis.lpush('msgbus.system.remote', encoded_msg) or {
-		panic('from zbus-cmd push to remote $err')
+		app.set_status(500, 'Internal Error')
+		return app.json('{"status": "error", "message": "could not send message to remote"}')
 	}
 
 	return app.json('{"retqueue": "$msg.retqueue"}')
@@ -114,23 +129,27 @@ pub fn (mut app App) zbus_http_result() vweb.Result {
 		println(app.req.data)
 	}
 	mid := json.decode(MessageIdentifier, app.req.data) or {
-		panic('Failed to parse json with error: $err')
+		app.set_status(400, 'Bad Request')
+		return app.json('{"status": "error", "message": "could not parse message request"}')
 	}
 	is_valid_retqueue := is_valid_uuid(mid.retqueue) or {
-		panic('Failed to check valid uuid with error: $err')
+		app.set_status(500, 'Internal Error')
+		return app.json('{"status": "error", "message": "could not check uuid"}')
 	}
 	if !is_valid_retqueue {
+		app.set_status(400, 'Bad Request')
 		return app.json('{"status": "error", "message": "Invalid Retqueue, it should be a valid UUID"}')
 	}
 
 	lr := app.config.redis.lrange(mid.retqueue, 0, -1) or {
+		app.set_status(500, 'Internal Error')
 		return app.json('{"status": "error", "message": "Error fetching from redis $err"}')
 	}
 	mut responses := []Message{}
 	for v in lr {
 		rv := resp2.get_redis_value(v)
 		mut m := json.decode(Message, rv) or {
-			eprintln(err)
+			eprintln(err.str())
 			Message{}
 		}
 		m.epoch = time.now().unix_time()
