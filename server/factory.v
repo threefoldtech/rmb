@@ -40,13 +40,13 @@ fn (mut ctx MBusSrv) resolver(twinid u32) ?string {
 }
 
 // tfgridnet is test,dev or main
-pub fn run_server(myid int, tfgridnet string, debug int) ? {
+pub fn run_server(myid int, tfgridnet string, workers int, debug int) ? {
 	println('[+] twin id: $myid')
 	mut server_threads := []thread ?{}
-	for _ in 0 .. 1000 {
+	for _ in 0 .. workers {
 		server_threads << go run_rmb(myid, tfgridnet, debug)
 	}
-	println('[+] server: workers started and waiting requests')
+	println('[+] server: $workers workers started and waiting requests')
 
 	go run_scrubbing(myid, tfgridnet, debug)
 	go run_retry(myid, tfgridnet, debug)
