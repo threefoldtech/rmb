@@ -30,21 +30,15 @@ fn run_rmb(myid int, tfgridnet string, logger Logger, ch chan IError) {
 		msg.validate() or { logger.error('Validation failed with error: $err\n$key : $msg') }
 
 		if key == 'msgbus.system.reply' {
-			srv.handle_from_reply(mut msg) or {
-				logger.error('error from (handle_from_reply), $err')
-			}
+			srv.handle_from_reply(mut msg)
 		}
 
 		if key == 'msgbus.system.local' {
-			srv.handle_from_local(mut msg) or {
-				logger.error('error from (handle_from_local), $err')
-			}
+			srv.handle_from_local(mut msg)
 		}
 
 		if key == 'msgbus.system.remote' {
-			srv.handle_from_remote(mut msg) or {
-				logger.error('[-] error from (handle_from_remote), $err')
-			}
+			srv.handle_from_remote(mut msg)
 		}
 	}
 }

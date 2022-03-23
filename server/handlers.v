@@ -7,40 +7,59 @@ import net.http
 
 const reply_forward_retries = 3
 
-fn (mut ctx MBusSrv) handle_from_reply_forward(mut msg Message) ? {
+fn (mut ctx MBusSrv) handle_from_reply_forward(mut msg Message) {
 	// reply have only one destination (source)
 	dst := msg.twin_dst[0]
-
+	mut error_msg := ""
+	mut response := http.Response{}
+	mut dest := ""
 	ctx.logger.debug('MSG $msg.id - resolving twin: $dst')
-	mut dest := ctx.resolver(u32(dst)) or {
-		return error("couldn't resolve twin ip with error: $err")
+	// handling network/server issues when sending the replay over http by retrying
+	for i in 0 .. server.reply_forward_retries {
+		error_msg = ""
+		dest = ctx.resolver(u32(dst)) or {
+			error_msg = "couldn't resolve twin ip with error: $err"
+			ctx.logger.debug('MSG $msg.id - attempt $i - $error_msg')
+			continue
+		}
+
+		ctx.logger.debug('forwarding reply to $dest\n$msg')
+		msg.epoch = time.now().unix_time()
+
+		// forward to reply agent
+		response = http.post('http://$dest:8051/zbus-reply', json.encode(msg)) or {
+			error_msg = "failed to send post request to $dest with error: $err"
+			ctx.logger.debug('MSG $msg.id - attempt $i - $error_msg')
+			continue
+		}
+
+		if response.status() != http.Status.ok {
+			error_msg = "got error response from twin $dst:\nstatus code: $response.status_code\nresponse: $response.text"
+			ctx.logger.debug('MSG $msg.id - attempt $i - $error_msg')
+			continue
+		}
+		break
+	}
+	if error_msg != "" {
+		ctx.logger.error("MSG $msg.id - couldn't send reply and all retries done. last error was: $error_msg")
+	} else {
+		ctx.logger.debug('MSG $msg.id - $response')
+		ctx.logger.info('MSG $msg.id - Reply sent to $dest')
 	}
 
-	ctx.logger.debug('MSG $msg.id - forwarding reply to $dest\n$msg')
-	msg.epoch = time.now().unix_time()
-
-	// forward to reply agent
-	response := http.post('http://$dest:8051/zbus-reply', json.encode(msg)) or {
-		return error('failed to send post request to $dest with error: $err')
-	}
-
-	if response.status() != http.Status.ok {
-		return error('failed to send remote: $response.status_code ($response.text)')
-	}
-
-	ctx.logger.debug('MSG $msg.id - $response')
-	ctx.logger.info('MSG $msg.id - Reply sent to $dest')
 }
 
-fn (mut ctx MBusSrv) handle_from_reply_for_me(mut msg Message) ? {
+fn (mut ctx MBusSrv) handle_from_reply_for_me(mut msg Message) {
 	ctx.logger.debug('MSG $msg.id - message reply for me, fetching backlog\n$msg')
 
 	retval := ctx.redis.hget('msgbus.system.backlog', msg.id) or {
-		return error('error fetching message from backend with error: $err')
+		ctx.logger.error('MSG $msg.id - error fetching original message from backlog with error: $err')
+		return
 	}
 
 	original := json.decode(Message, retval) or {
-		return error('original decode failed with error: $err')
+		ctx.logger.critical('MSG $msg.id - original message decode failed with error: $err')
+		return
 	}
 
 	// restore return queue name for the caller
@@ -49,74 +68,64 @@ fn (mut ctx MBusSrv) handle_from_reply_for_me(mut msg Message) ? {
 
 	// forward reply to original sender
 	ctx.redis.lpush(msg.retqueue, json.encode(msg)) or {
-		return error('failed to push message to redis with error: $err')
+		ctx.logger.critical('MSG $msg.id - failed to push message to redis return queue $msg.retqueue with error: $err')
+		return
 	}
 
 	// Make key expire after 30 mins
 	expire_time_in_sec := 30 * 60
 	ctx.redis.expire(msg.retqueue, expire_time_in_sec) or {
-		return error('failed to set expire time to $msg.retqueue with error: $err')
+		ctx.logger.critical('MSG $msg.id - failed to set expire time to redis return queue $msg.retqueue with error: $err')
+		return
 	}
 
 	// remove from backlog
 	ctx.redis.hdel('msgbus.system.backlog', msg.id) or {
-		return error('failed to delete $msg.id from backlog with error: $err')
+		ctx.logger.critical('MSG $msg.id - failed to delete message from backlog with error: $err')
+		return
 	}
 	ctx.logger.info('MSG $msg.id - Pushed to $msg.retqueue')
 }
 
-fn (mut ctx MBusSrv) handle_from_reply_for_proxy(mut msg Message) ? {
+fn (mut ctx MBusSrv) handle_from_reply_for_proxy(mut msg Message) {
 	ctx.logger.debug('MSG $msg.id - message reply for proxy\n$msg')
 
 	// forward reply to original sender
 	ctx.redis.lpush(msg.retqueue, json.encode(msg)) or {
-		return error('failed to push message to redis with error: $err')
+		ctx.logger.critical('MSG $msg.id - failed to push message to redis with error: $err')
+		return
 	}
 
 	// Make key expire after 30 mins
 	expire_time_in_sec := 30 * 60
 	ctx.redis.expire(msg.retqueue, expire_time_in_sec) or {
-		return error('failed to set expire time to $msg.retqueue with error: $err')
+		ctx.logger.critical('MSG $msg.id - failed to set expire time to $msg.retqueue with error: $err')
+		return
 	}
 	ctx.logger.info('MSG $msg.id - Pushed to $msg.retqueue')
 }
 
-fn (mut ctx MBusSrv) handle_from_reply(mut msg Message) ? {
+fn (mut ctx MBusSrv) handle_from_reply(mut msg Message) {
 	if msg.proxy {
-		ctx.handle_from_reply_for_proxy(mut msg) or {
-			return error('failed to handle reply proxy with error: $err')
-		}
+		ctx.handle_from_reply_for_proxy(mut msg)
 	} else if msg.twin_dst[0] == ctx.myid {
-		ctx.handle_from_reply_for_me(mut msg) or {
-			return error('failed to handle reply for me with error: $err')
-		}
+		ctx.handle_from_reply_for_me(mut msg)
 	} else if msg.twin_src == ctx.myid {
-		// handling network/server issues when sending the replay over http by retrying
-		// this decrease the number of failing messages due to failed tcp conection from 9+ to 0 in our tests
-		mut reply_forward_err := ''
-		for _ in 0 .. server.reply_forward_retries {
-			ctx.handle_from_reply_forward(mut msg) or {
-				reply_forward_err = '$err'
-				continue
-			}
-			break
-		}
-		if reply_forward_err != '' {
-			return error('failed to handle reply forward with error: $reply_forward_err')
-		}
+		ctx.handle_from_reply_forward(mut msg)
 	}
 }
 
-fn (mut ctx MBusSrv) handle_from_remote(mut msg Message) ? {
+fn (mut ctx MBusSrv) handle_from_remote(mut msg Message) {
 	ctx.logger.debug('MSG $msg.id - forwarding to local service: msgbus.' + msg.command)
 
 	// forward to local service
 	ctx.redis.lpush('msgbus.' + msg.command, json.encode(msg)) or {
-		return error('failed to push ($msg.command) with error: $err')
+		ctx.logger.critical('failed to push ($msg.command) with error: $err')
+		return
 	}
 }
 
-fn (mut ctx MBusSrv) msg_needs_retry(mut msg Message, retry_reason string) ? {
+fn (mut ctx MBusSrv) msg_needs_retry(mut msg Message, retry_reason string) {
 	ctx.logger.debug('MSG $msg.id - needs retry due to $retry_reason')
 
 	msg.epoch = time.now().unix_time()
@@ -124,9 +133,10 @@ fn (mut ctx MBusSrv) msg_needs_retry(mut msg Message, retry_reason string) ? {
 		msg.err = 'could not send request and all retries done, last error: $retry_reason'
 		output := json.encode(msg)
 		ctx.redis.lpush(msg.retqueue, output) or {
-			return error('failed to respond to the caller with the proper error, due to $err')
+			ctx.logger.critical('failed to respond to the caller with the proper error, due to $err')
+			return
 		}
-		ctx.logger.warning('MSG $msg.id - no more retry, replying with error $msg.err')
+		ctx.logger.error('MSG $msg.id - no more retry, replying with error $msg.err')
 		return
 	}
 
@@ -137,11 +147,11 @@ fn (mut ctx MBusSrv) msg_needs_retry(mut msg Message, retry_reason string) ? {
 
 	value := json.encode(msg)
 	ctx.redis.hset('msgbus.system.retry', msg.id, value) or {
-		return error('failed to push message in reply queue with error: $err')
+		ctx.logger.critical('failed to push message in reply queue with error: $err')
 	}
 }
 
-fn (mut ctx MBusSrv) handle_from_local_item(mut msg Message, dst int) ? {
+fn (mut ctx MBusSrv) handle_from_local_item(mut msg Message, dst int) {
 	msg.epoch = time.now().unix_time()
 	mut update := msg
 	update.twin_src = ctx.myid
@@ -152,22 +162,21 @@ fn (mut ctx MBusSrv) handle_from_local_item(mut msg Message, dst int) ? {
 	mut error_msg := ''
 	defer {
 		if error_msg != '' {
-			ctx.msg_needs_retry(mut single_dst_message, error_msg) or {
-				ctx.logger.error('failed while processing message retry with error: $err')
-				ctx.logger.error('original error: $error_msg')
-			}
+			ctx.msg_needs_retry(mut single_dst_message, error_msg)
 		}
 	}
-	id := ctx.redis.incr('msgbus.counter.$dst') or {
-		error_msg = 'failed to increment msgbus.counter.$dst with error: $err'
-		return error(error_msg)
+	// if error happens here no need to proceed to msg_needs_retry without id being set in the message
+	id := ctx.redis.incr('msgbus.counter.$dst') or { 
+		ctx.logger.critical('BUG: message will not be send. failed to increment msgbus.counter.$dst with error: $err')
+		return
 	}
 	single_dst_message.id = '${dst}.$id'
 
 	ctx.logger.debug('MSG $single_dst_message.id - resolving twin: $dst')
 	mut dest := ctx.resolver(u32(dst)) or {
 		error_msg = 'failed to resolve twin ($dst) destination'
-		return error(error_msg)
+		ctx.logger.debug('MSG $single_dst_message.id - $error_msg')
+		return
 	}
 
 	update.id = '${dst}.$id'
@@ -177,13 +186,15 @@ fn (mut ctx MBusSrv) handle_from_local_item(mut msg Message, dst int) ? {
 	ctx.logger.debug('MSG $update.id - forwarding msg to $dest\n$update')
 	output := json.encode(update)
 	response := http.post('http://$dest:8051/zbus-remote', output) or {
-		error_msg = 'failed to send remote with error: $err'
-		return error(error_msg)
+		error_msg = 'failed to send message to twin $dst with error: $err'
+		ctx.logger.debug('MSG $update.id - $error_msg')
+		return
 	}
 
 	if response.status() != http.Status.ok {
-		error_msg = 'failed to send remote: $response.status_code ($response.text)'
-		return error(error_msg)
+		error_msg = 'got error response from twin $dst:\nstatus code: $response.status_code\nresponse: $response.text'
+		ctx.logger.debug('MSG $update.id - $error_msg')
+		return
 	}
 
 	ctx.logger.debug('MSG $update.id - $response')
@@ -192,16 +203,14 @@ fn (mut ctx MBusSrv) handle_from_local_item(mut msg Message, dst int) ? {
 	// keep message sent into backlog
 	// needed to find back return queue etc.
 	ctx.redis.hset('msgbus.system.backlog', update.id, json.encode(msg)) or {
-		error_msg = 'failed to push message in backlog with error: $err'
-		return error(error_msg)
+		ctx.logger.critical('MSG $update.id - message sent but failed to push message to backlog with error: $err')
+		return
 	}
 }
 
-fn (mut ctx MBusSrv) handle_from_local(mut msg Message) ? {
+fn (mut ctx MBusSrv) handle_from_local(mut msg Message) {
 	for dst in msg.twin_dst {
-		ctx.handle_from_local_item(mut msg, dst) or {
-			ctx.logger.error('failed to handle message in handle_from_local_item with error: $err')
-		}
+		ctx.handle_from_local_item(mut msg, dst)
 	}
 }
 
@@ -274,9 +283,7 @@ fn (mut ctx MBusSrv) handle_retry() ? {
 			}
 
 			// re-call sending function, which will succeed or put it back to retry
-			ctx.handle_from_local_item(mut entry.value, entry.value.twin_dst[0]) or {
-				ctx.logger.error('MSG $entry.key - failed to handle_from_local_item , retry handled from there')
-			}
+			ctx.handle_from_local_item(mut entry.value, entry.value.twin_dst[0])
 		}
 	}
 }
