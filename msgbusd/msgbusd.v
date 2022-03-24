@@ -8,10 +8,12 @@ import os
 const max_workers = 10
 
 const default_workers = 4
+
 const options = ['--twin', '--tfgridnet', '--log-level', '--workers']
+
 fn main() {
 	mut logger := console.Logger{}
-	usage := r"Usage: msgbusd <options>
+	usage := r'Usage: msgbusd <options>
 
   --twin       <twin-id>
   --tfgridnet  [dev,test or main]
@@ -23,7 +25,7 @@ fn main() {
   [optional] --log-level 	set log level 	default error
   [optional] --workers 		number of threads used, 1 to $max_workers  default $default_workers
 	
-"
+'
 	for arg in cmdline.only_options(os.args) {
 		if arg !in options {
 			logger.error('Unknown arg $arg, please check usage info.')

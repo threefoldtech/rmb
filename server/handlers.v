@@ -10,13 +10,13 @@ const reply_forward_retries = 3
 fn (mut ctx MBusSrv) handle_from_reply_forward(mut msg Message) {
 	// reply have only one destination (source)
 	dst := msg.twin_dst[0]
-	mut error_msg := ""
+	mut error_msg := ''
 	mut response := http.Response{}
-	mut dest := ""
+	mut dest := ''
 	ctx.logger.debug('MSG $msg.id - resolving twin: $dst')
 	// handling network/server issues when sending the replay over http by retrying
 	for i in 0 .. server.reply_forward_retries {
-		error_msg = ""
+		error_msg = ''
 		dest = ctx.resolver(u32(dst)) or {
 			error_msg = "couldn't resolve twin ip with error: $err"
 			ctx.logger.debug('MSG $msg.id - attempt $i - $error_msg')
@@ -28,25 +28,24 @@ fn (mut ctx MBusSrv) handle_from_reply_forward(mut msg Message) {
 
 		// forward to reply agent
 		response = http.post('http://$dest:8051/zbus-reply', json.encode(msg)) or {
-			error_msg = "failed to send post request to $dest with error: $err"
+			error_msg = 'failed to send post request to $dest with error: $err'
 			ctx.logger.debug('MSG $msg.id - attempt $i - $error_msg')
 			continue
 		}
 
 		if response.status() != http.Status.ok {
-			error_msg = "got error response from twin $dst:\nstatus code: $response.status_code\nresponse: $response.text"
+			error_msg = 'got error response from twin $dst:\nstatus code: $response.status_code\nresponse: $response.text'
 			ctx.logger.debug('MSG $msg.id - attempt $i - $error_msg')
 			continue
 		}
 		break
 	}
-	if error_msg != "" {
+	if error_msg != '' {
 		ctx.logger.error("MSG $msg.id - couldn't send reply and all retries done. last error was: $error_msg")
 	} else {
 		ctx.logger.debug('MSG $msg.id - $response')
 		ctx.logger.info('MSG $msg.id - Reply sent to $dest')
 	}
-
 }
 
 fn (mut ctx MBusSrv) handle_from_reply_for_me(mut msg Message) {
@@ -166,7 +165,7 @@ fn (mut ctx MBusSrv) handle_from_local_item(mut msg Message, dst int) {
 		}
 	}
 	// if error happens here no need to proceed to msg_needs_retry without id being set in the message
-	id := ctx.redis.incr('msgbus.counter.$dst') or { 
+	id := ctx.redis.incr('msgbus.counter.$dst') or {
 		ctx.logger.critical('BUG: message will not be send. failed to increment msgbus.counter.$dst with error: $err')
 		return
 	}
