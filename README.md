@@ -20,6 +20,10 @@ More options are available:
 (eg: `127.0.0.1:6379`, this is the default value) or a unix socket (eg: `/var/run/redis.sock`)
 - The substrate argument should be a valid http webservice made to query substrate db
 
+## a version in rust is being built
+
+https://github.com/threefoldtech/rmb-rs
+
 ## Specification
 
 Object Schema:
