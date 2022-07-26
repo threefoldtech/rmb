@@ -1,8 +1,9 @@
 module server
 
 import threefoldtech.vgrid.explorer
-import despiegk.crystallib.redisclient
-import despiegk.crystallib.console { Logger }
+import freeflowuniverse.crystallib.redisclient
+import freeflowuniverse.crystallib.redisclientcore
+import freeflowuniverse.crystallib.console { Logger }
 
 struct MBusSrv {
 mut:
@@ -13,7 +14,7 @@ mut:
 }
 
 fn srvconfig_get(myid int, tfgridnet string, logger Logger) ?&MBusSrv {
-	mut redis := redisclient.get_unixsocket_new_default() or {
+	mut redis := redisclientcore.get_unixsocket_new() or {
 		return error('failed to connect to redis locally with error: $err')
 	}
 
@@ -38,7 +39,7 @@ fn srvconfig_get(myid int, tfgridnet string, logger Logger) ?&MBusSrv {
 }
 
 fn (mut ctx MBusSrv) resolver(twinid u32) ?string {
-	twin := ctx.explorer.twin_by_id(twinid) ?
+	twin := ctx.explorer.twin_by_id(twinid)?
 	return twin.ip
 }
 

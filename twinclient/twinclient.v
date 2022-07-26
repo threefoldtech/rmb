@@ -2,7 +2,7 @@ module twinclient
 
 import threefoldtech.rmb.client { MessageBusClient, prepare }
 import threefoldtech.rmb.server { Message }
-import despiegk.crystallib.redisclient
+import freeflowuniverse.crystallib.redisclient
 import encoding.base64
 
 pub struct TwinClient {
@@ -29,7 +29,7 @@ Create a new Client isntance
 pub fn new(redis_server string, dest int) ?TwinClient {
 	return TwinClient{
 		mb: MessageBusClient{
-			client: redisclient.get(redis_server) ?
+			client: redisclient.get(redis_server)?
 		}
 		msg_param: MsgParameters{
 			destination: [dest]

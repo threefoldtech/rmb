@@ -1,7 +1,7 @@
 module main
 
 import threefoldtech.rmb.server
-import despiegk.crystallib.console
+import freeflowuniverse.crystallib.console
 import os.cmdline
 import os
 

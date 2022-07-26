@@ -1,5 +1,5 @@
 import threefoldtech.rmb.client
-import despiegk.crystallib.redisclient
+import freeflowuniverse.crystallib.redisclient
 
 fn test_client() {
 	mut mb := client.MessageBusClient{

@@ -5,8 +5,8 @@ import rand
 import time
 import json
 import encoding.base64
-import despiegk.crystallib.redisclient
-import despiegk.crystallib.resp2
+import freeflowuniverse.crystallib.redisclient
+import freeflowuniverse.crystallib.resp2
 
 pub struct MessageBusClient {
 pub mut:

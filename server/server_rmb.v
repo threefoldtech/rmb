@@ -1,12 +1,12 @@
 module server
 
-import despiegk.crystallib.resp2
-import despiegk.crystallib.console { Logger }
+import freeflowuniverse.crystallib.resp2
+import freeflowuniverse.crystallib.console { Logger }
 import json
 import time
 
 // is the main loop getting info from the redis and making sure it gets processed
-fn run_rmb(myid int, tfgridnet string, logger Logger, ch chan IError) {
+pub fn run_rmb(myid int, tfgridnet string, logger Logger, ch chan IError) {
 	mut srv := srvconfig_get(myid, tfgridnet, logger) or {
 		ch <- error('${@FN} - $err')
 		return

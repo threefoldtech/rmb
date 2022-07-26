@@ -4,8 +4,8 @@ import json
 import vweb
 import rand
 import time
-import despiegk.crystallib.resp2
-import despiegk.crystallib.console { Logger }
+import freeflowuniverse.crystallib.resp2
+import freeflowuniverse.crystallib.console { Logger }
 import encoding.base64
 
 struct App {
@@ -14,8 +14,8 @@ mut:
 	config MBusSrv [vweb_global]
 }
 
-fn run_web(myid int, tfgridnet string, logger Logger) ? {
-	mut srv := srvconfig_get(myid, tfgridnet, logger) ?
+pub fn run_web(myid int, tfgridnet string, logger Logger) ? {
+	mut srv := srvconfig_get(myid, tfgridnet, logger)?
 	app := App{
 		config: srv
 	}

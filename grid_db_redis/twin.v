@@ -1,7 +1,7 @@
 module grid_db_redis
 
 import threefoldtech.vgrid.explorer
-import despiegk.crystallib.redisclient
+import freeflowuniverse.crystallib.redisclient
 import json
 
 struct TWIN {
@@ -15,20 +15,20 @@ mut:
 }
 
 fn (mut db TFGRIDDB) key_id(id int) string {
-	return "tfgriddb:${db.tfgrid_net}:twin:$id"
+	return "tfgriddb:${db.tfgridnet}:twin:$id"
 }
 
 //this is the redis table which is lookup between name & id
 fn (mut db TFGRIDDB) key_name_lookup(name string) string {
-	return "tfgriddb:${db.tfgrid_net}:twin_lookup:$name"
+	return "tfgriddb:${db.tfgridnet}:twin_lookup:$name"
 }
 
 
 pub fn (mut db TFGRIDDB) get_from_id(id int) ? {
-	data := bd.redis.get(db.key_id(twin.id)) or {
+	data := db.redis.get(db.key_id(id)) or {
 		return error("could not find twin with id: $id")
 	}
-	twin := json.decode(data,TWIN)
+	twin := json.decode(db.redis.get(db.key_id(id)), TWIN)
 	return twin
 }
 
